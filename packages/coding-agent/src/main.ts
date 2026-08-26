@@ -205,6 +205,10 @@ import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<number>;
 type RunRpcMode = (session: AgentSession, options?: RpcModeOptions) => Promise<never>;
+type RunWebMode = (
+	session: AgentSession,
+	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
+) => Promise<never>;
 
 /** Interactive-only graph boundary; login dialogs and overlays load on first real use. */
 async function loadInteractiveModeConstructor() {
@@ -1893,7 +1897,7 @@ export async function runRootCommand(
 		// Classify the host before opening auth or settings storage so every
 		// session-critical database connection picks the right busy timeout.
 		// See getDbBusyTimeoutMs().
-		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
+		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp" || mode === "web";
 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 		// Without a terminal on stdin the TUI cannot run, so such a launch is always
@@ -2333,7 +2337,7 @@ export async function runRootCommand(
 			);
 			options.authStorage = authStorage;
 			options.modelRegistry = modelRegistry;
-			options.hasUI = isInteractive || mode === "rpc-ui";
+			options.hasUI = isInteractive || mode === "rpc-ui" || mode === "web";
 			options.allowSessionModelFallback = isInteractive;
 			options.settingsApproval = isInteractive;
 			options.tuiTranscript = isInteractive;
@@ -2767,6 +2771,12 @@ export async function runRootCommand(
 					mcpManager,
 					input: rpcInput,
 				});
+			} else if (mode === "web") {
+				// Branch-only web GUI runner: keep web host code out of normal interactive startup.
+				const runWebMode: RunWebMode = (await import("./modes/web/run-web-mode")).runWebMode;
+				stopStartupWatchdog();
+				logger.endTiming();
+				await runWebMode(session, setToolUIContext);
 			} else if (isInteractive) {
 				const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 				const startupChangelog = await startupChangelogPromise;

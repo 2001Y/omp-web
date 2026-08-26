@@ -3,6 +3,90 @@
 ## [Unreleased]
 
 ## [18.13.2] - 2026-10-27
+### Changed (omp-web packaging)
+
+- Web mode: the dsh runtime tree auto-detection now also checks an in-repo `dsh-web/` directory (gitignored) before the sibling-of-checkout layout, so the release tarball can be extracted straight into the clone.
+
+### Fixed (omp-web M20)
+
+- Web mode: attached sessions keep their persisted title — `OmpWebDriver` now seeds the history baseline with `SessionManager.getSessionName()` first and only derives from the first user message when untitled; previously the projection seed's delete semantics erased the list-seeded derived title, so opening a session with no user message after its last compaction dropped the title to the cwd basename.
+- Web mode: the listing's `(no messages)` placeholder is treated as untitled when deriving the baseline title (falls back to the cwd basename instead of surfacing the placeholder).
+- Web mode: `session.search` deep-scans session files (≤ 16 MB) past the listing's 4 KB prefix window when the cheap pass finds nothing, returning a JSON-cleaned ±600-char match window as the snippet — matches buried mid-file in large sessions are now findable.
+
+### Fixed (omp-web M18)
+
+- Web mode: switching sessions (or creating a new one) now re-enters or clears plan/vibe/goal mode to match the target session's persisted `mode_change` fold — previously `switchSession` restored messages and model but never the mode fields or tool sets, so the source session's mode leaked into the switch target. A `setSessionSwitchReconciler` hook on `AgentSession` drives the reconcile (TUI `#reconcileModeFromSession` parity: state + tool sets).
+- Web mode: abort/rewind/switch settle the session's parked browser asks first (`cancel-asks` stream notification), so a pending approval can no longer deadlock `session.abort()`'s wait-for-idle.
+- Web mode: steering user messages fold into the transcript as ordinary user turns (live and history paths) — they previously vanished from the chat flow while remaining visible in the History tree.
+- Web mode: `pageHistory` no longer returns an empty page (soft-locking load-older) when the message budget cuts inside an over-budget turn.
+- Web mode: builtin slash-command hooks are wired — `refreshCommands` broadcasts `commands/change`, `reloadPlugins` clears discovery caches and rebuilds capabilities/skills/slash commands (both were no-ops).
+- Web mode: `settings.openDocument` on win32 launches via `cmd /c start` (`start` is a shell builtin, not an executable); `fileReferences/list` refuses paths escaping the session cwd; the browser-client settings store writes atomically and honors nested mutation paths.
+- Web mode: occupied `OMP_WEB_PORT` falls back to an OS-assigned port with a warning instead of dying; SIGINT/SIGTERM stop the server immediately (the extension-shutdown poll no longer gates on a 60 s sleep).
+
+### Changed (omp-web M18)
+
+- Web mode: model catalog entries declare their reasoning-effort selector through the protocol's `WebModelEntry.reasoning` field; provider logout and model-role assignment moved off magic settings keys onto the dedicated `logoutProvider`/`setModelRole` driver verbs.
+- Web mode: `redactedThinking` assistant blocks are dropped from the wire transcript (the data is a provider-opaque encrypted blob, not renderable text).
+
+### Fixed (omp-web M17)
+
+- Web mode: the display-log seed (cold history, session switch, new session, rewind re-seed) and the fork turn-boundary scan now fold ONLY the active branch (root → leaf chain) instead of every entry — forked histories no longer interleave into the conversation, which had left heavily-branched sessions rendering no messages and rewind rebuilds wrong.
+
+### Changed (omp-web M16)
+
+- Web mode: session forks now materialize through the native `SessionManager.forkFrom` (truncated source staged as a raw line-prefix in the OS temp dir, artifacts via `copySessionArtifacts`), so forked session files are byte-compatible with interactive `/fork` — no hand-written session serialization remains.
+
+### Changed (omp-web M15)
+
+- Web mode: derived session titles (first user message) now broadcast as the `title` session projection when a turn ends, so the sidebar names sessions without a list repull.
+
+### Changed (omp-web M14)
+
+- Web mode: session name changes (auto titles included) now broadcast the `title` session projection and invalidate the list cache, so the sidebar title updates live.
+
+### Changed (omp-web M12/M13)
+
+- Web mode: the History view now serves every entry type in the TUI `/tree` vocabulary (`modes/web/history-tree.ts`), rewind splices the display-log epoch past the client's tail (a `rewind` marker command event triggers the client's gap repair, rebuilding the conversation window without client changes), and fork broadcasts `session-added` so the sidebar picks the child up live.
+
+### Added
+
+- Added `--mode web`: a web GUI host mode serving the vendored dsh-web client stack (boot-graph-injected frontend, `/api` browser RPC carrier, and downlink WebSocket event streams) from the new `@oh-my-pi/web` package, driven by the `OmpWebDriver` in `src/modes/web/`. M0 serves the read-only surface (`host.describe`, `session.list`, an implicit workspace view); the vendored tree location comes from `OMP_WEB_DSH_ROOT` (default: the `dsh-web/` sibling of the repository checkout) and the port from `OMP_WEB_PORT` (default 3180).
+- M1 chat loop in the web mode: `src/modes/web/translate.ts` folds `AgentSessionEvent`s and persisted message history onto the web client's session-event vocabulary (turn/step boundaries, streaming text/reasoning chunks, tool call/result correlation with epoch-unique call ids, canonical per-attachment seq space). `OmpWebDriver` now serves `session.create/history/prompt/cancel/rename/models` over the single-attachment model (TUI parity: prompting a cold session switches the underlying `AgentSession`), and `workspace.list` derives one workspace per `~/.omp/agent/sessions` cwd bucket.
+- M2 interactions in the web mode: `src/modes/web/ui-context.ts` bridges the `ExtensionUIContext` surface (tool approval select/confirm/input/ask dialogs) onto browser asks; `runWebMode` installs it through both `setToolUIContext` and `initializeExtensions` so the per-tool approval gate (which wraps every tool in `ExtensionToolWrapper` and consults the extension runner's UI context) lights up instead of failing closed. `OmpWebDriver` gains the RPC dispatch chain for `commands/execute` (skill command → text-mode builtin → prompt fallback), a client-owned command filter (`/model` is the browser's own popup), serialized session attach (opening a cold session via `session.history` attaches it, letting `commands/list`, `session.models`, `selectModel`, and `rename` self-heal across page-load races), and `session.selectModel` with reasoning-effort selection.
+- M3 batch 1 in the web mode: command lifecycle events (`command/run`/`command/done` render the slash command and its output in the chat flow, persisted as `omp-web/command` custom entries that reload at their original interleaved positions), message-boundary history paging (`hasMore` + `beforeSeq` anchored windows that never start mid-turn), and queue visibility (the prompt streaming fix mapping `mode: queue|steer` onto `followUp`/`steer` admission — previously a running session silently rejected prompts — plus `session/queue` snapshots after every queue mutation and the `session.updateQueue` edit/remove/steer operations over `agent.replaceQueues`).
+- M3 batch 2 in the web mode: the settings dialog's document surface (`settings.describe` reports the read-only facts; `settings.openDocument` materializes the omp settings yaml and hands it to the platform opener), the `subagent.list` catalog over the process-global `AgentRegistry` (live direct children as continuable rows, feeding the session header's subagent count), and `commands/change` broadcast wired to `subscribeCommandMetadataChanged` so the browser command menu refreshes when the registry moves.
+- M4 audit batch in the web mode: the plan-mode bridge (the `/plan` command drives the enter/exit core — session state, the write-augmented tool set, the mode context — and mirrors flips as `plan/mode` events plus the `plan` projection, restoring from persisted `mode_change` entries on reload so the client's plan chip and placeholder track it), the ask-tool question loop (`hasUI` now covers web mode so the ask tool ships; the UI context's dialog methods became arrow fields after the ask tool's detached-funcall broke `this`), browser-client settings persistence (`settings.mutate`/`update` over a `web-client-settings.json` store — the beta-notice acknowledgement and friends), and the `agentPreset.list` empty stub.
+- M11 in the web mode: tree styling per user feedback — nested recursive rows with continuous guide-line connectors (border-left lanes plus per-row elbow stubs with a rounded first-child arc), no resting row background (hover and selected only), and the action bar's buttons moved onto the dsh Button primitive (outline/sm).
+- M10 in the web mode: TUI /tree parity for the History view — square corners with dot-and-elbow connector styling (pseudo-element parent lanes), Rewind enabled on every node, and a rewound user message's text lands in the composer for editing (`ompHistory/navigate` now returns `editorText` from `navigateTree`; the view writes it through the session standard kit's `inputActions.setDraft`).
+- M9 in the web mode: the History view became a two-pane browser — a file-tree-style selector on the left (indent guides, collapsible branch carets, colored role labels, branch-count badges, current-path dots) and an entry detail pane on the right with an action bar: Rewind here (disabled on the live path's nodes) and Fork here (`ompHistory/forkAt`, an entry-anchored cut through the fork anchor `{atSeq?|entryId?}`).
+- M8 in the web mode: the History view — a third conversation tab (after chat and trajectory) rendering the session's message-entry tree (role rows with summaries, parent-spine indentation, branch-point badges, current-path highlight) with a Rewind action per node over the new `ompHistory/tree`/`ompHistory/navigate` RPCs (`WebDriver.historyTree`/`navigateToEntry`, the latter reseeding the canonical log after `navigateTree`).
+- M7 batch 2 in the web mode: the vibe and goal mode bridges — `/vibe` toggles the read-only worker toolset with full enter/exit semantics (mode teardown, toolset restore, mode_change entries), and `/goal set|show|pause|resume|drop` drives the goal-mode state lifecycle (state flips, goal/goal_paused mode entries, context delivery), both registered in the web command menu.
+- M7 in the web mode: `session.fork` — the message menu's branch button serves a file-level fork (`src/modes/web/fork.ts`): the source JSONL folds through the translator to locate the `turn/end` boundary at or after `atSeq`, entries past the boundary time are dropped, and the child (new id, inherited cwd/title, `parentSession` = source path) lands beside the source; the attached session is flushed first but never switched.
+- M5 batch 1 in the web mode: sidebar session titles (`session.list` rows carry their title through the projections block — the conversation's title or first prompt instead of the cwd folder name) and `@` file mentions (`fileReferences/list` over a cwd readdir with prefix matching, hidden/VCS directory exclusion, and file/directory-kind candidates; selection inserts the path mention, directories keep completion open).
+- M5 batch 2 in the web mode: the full OMP settings surface — a new client plugin (`@omp/client-settings`, built with the vendored tree's shared tsdown preset and appended to the boot roster) registers one settings section per OMP settings tab (appearance, model, interaction, context, memory, files, shell, tools, tasks, providers) rendered from the new `ompSettings/describe` catalog (SETTINGS_SCHEMA projected into tabs → groups → fields), with `ompSettings/update` persisting through `settings.set`.
+- M5 batch 3 in the web mode: the `/model` model-role assignment surface (the Model tab leads with a Model Roles group — one selector per known role over the full catalog with an unset-inherits-default choice, writes routed through `session.setModel(role, persist)` and `setModelRole` for clears) and the provider credentials surface — both as dedicated sections per user direction: Model Roles sits next to the Model tab (tag pill + per-role selector over the catalog, unset-inherits-default) and Connect next to Providers (per-provider credential rows with a Connected/Logout action through `authStorage.remove`, refreshed after logout).
+
+- Added side-by-side image and SVG previews to `omp git`, including local Git LFS object resolution and explicit placeholders for unavailable or unsupported binary content.
+- Added the `omp if-bench` command: a zero-tool instruction-following and working-memory benchmark that drives one cached conversation per model, adding one more glyph array action every turn while a `nya{1,N}` directive moves through the prompt, with a live turn-ladder board and a ranked scoreboard
+- Added `q` shortcut to exit the git TUI
+- Added a third state to the git TUI whitespace toggle (`b`): beyond ignoring whitespace-only line changes, it hides formatting-only changes (indentation, line splits/joins, blank lines) and import-only changes in TypeScript/JavaScript, Rust, and Go
+- Compressed single-child directory chains in the sidebar tree view
+
+### Changed
+
+- Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
+- Added `r` shortcut to refresh the git state
+- Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar
+- Added `space` shortcut as page down in the diff pane
+- Expanded `omp git` keyboard navigation: `alt+↓`/`alt+↑` jump hunks and roll into the adjacent file at the edges, `]`/`[` switch files, `←`/`→` collapse/expand sidebar directories, `enter` opens the selected file, vim motions (`j`/`k`/`h`/`l`/`g`/`G`) work in both panes, `1`–`4` pick a diff view directly, and `c` jumps to the commit form.
+
+### Fixed
+
+- Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
+- Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
+- Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
+
+## [18.0.4] - 2026-08-24
 
 ### Added
 

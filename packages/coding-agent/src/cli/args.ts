@@ -21,7 +21,7 @@ import { CliUsageError } from "./usage-error";
 
 export { getExtraHelpText };
 
-export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
+export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui" | "web";
 
 export interface Args {
 	cwd?: string;

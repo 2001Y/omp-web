@@ -405,6 +405,10 @@
 			"types": "./src/modes/acp/*.ts",
 			"import": "./src/modes/acp/*.ts"
 		},
+		"./modes/web/*": {
+			"types": "./src/modes/web/*.ts",
+			"import": "./src/modes/web/*.ts"
+		},
 		"./modes/components": {
 			"types": "./src/modes/components/index.ts",
 			"import": "./src/modes/components/index.ts"
@@ -548,6 +552,7 @@
 		"@oh-my-pi/pi-utils": "catalog:",
 		"@oh-my-pi/pi-wire": "catalog:",
 		"@oh-my-pi/snapcompact": "catalog:",
+		"@oh-my-pi/web": "catalog:",
 		"@opentelemetry/api": "catalog:",
 		"@opentelemetry/api-logs": "catalog:",
 		"@opentelemetry/context-async-hooks": "catalog:",
