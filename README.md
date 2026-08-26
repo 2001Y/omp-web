@@ -32,7 +32,8 @@ from the [latest release](https://github.com/LaneSun/omp-web/releases) and
 extract it as `dsh-web/` inside this repo (auto-detected):
 
 ```sh
-curl -fsSL <release-tarball-url> | tar -xz -C dsh-web --strip-components=0  # creates ./dsh-web
+mkdir -p dsh-web
+curl -fsSL https://github.com/LaneSun/omp-web/releases/download/v0.1.0/dsh-web-runtime-0.1.0.tar.gz | tar -xz -C dsh-web
 ```
 
 **B. Source build** — clone deepseek-harness at the pinned baseline, overlay
