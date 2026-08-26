@@ -15,13 +15,15 @@
 
 ## Install & run
 
-Prerequisites: [Bun](https://bun.sh) ≥ 1.4. Node ≥ 22.19 and pnpm 11.7 are
-only needed if you build the dsh runtime from source (option B).
+Prerequisites: [Bun](https://bun.sh) ≥ 1.4 and a Rust toolchain (the agent's
+N-API addon is built from source; `nix develop` gives you both pinned).
+Node ≥ 22.19 and pnpm 11.7 are only needed if you build the dsh runtime from
+source (option B).
 
 ```sh
 git clone https://github.com/LaneSun/omp-web.git
 cd omp-web
-bun install
+bun setup        # installs workspaces + builds the pi-natives addon
 ```
 
 The browser stack is served from a **dsh-web runtime tree** (MIT-licensed,
@@ -46,7 +48,7 @@ scripts/setup-dsh-web.sh            # clones + builds into ./dsh-web
 Then start the web mode:
 
 ```sh
-bun packages/coding-agent/src/cli.ts --mode web
+bun dev --mode web
 # → http://127.0.0.1:3180
 ```
 
