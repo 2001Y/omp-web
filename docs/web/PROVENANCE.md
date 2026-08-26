@@ -221,3 +221,28 @@ vendored 原版文件的每一处改动、以及胶水层对原版逻辑的行�
 **已知残留（非缺陷）**：「(no messages) (1)」为修复前分叉时已持久化的历史标题；
 TUI-only 设置项标注按用户指示不做；DSH 品牌位（DSH Local Build / Into the Unknown）
 维持原版，如需更名需 A3 确认与明确方向。
+
+## 发布形态（2026-08-26，M21）
+
+- **仓库**：fork 发布为独立公开仓库 [LaneSun/omp-web](https://github.com/LaneSun/omp-web)
+  （`origin`；上游 can1357/oh-my-pi 改挂 `upstream`）。首个 release：tag `v0.1.0`。
+- **dsh-web 不入仓**：vendored 树（1.6 GiB，含 node_modules 与构建产物）不进 git。
+  运行时经两条路径获得：
+  1. Release 资产 `dsh-web-runtime-<v>.tar.gz`（约 4.3 MiB）——由
+     `scripts/package-dsh-runtime.ts` 从本地已构建树收集：apps/web/dist 全量 +
+     36 个花名册包的 package.json + `lib/client.js`(+map) + LICENSE +
+     THIRD_PARTY_NOTICES + `OMP-WEB-MANIFEST.json`（基线 commit/时间戳/清单）。
+     解包即 dsh 根；已实测：解包树启动服务 → index 200 + boot 图注入 +
+     插件 bundle 200 + 浏览器完整渲染。
+  2. `scripts/setup-dsh-web.sh` 源码构建——clone deepseek-harness @ 固定基线
+     （treeless depth-1）、pnpm install --frozen-lockfile、pnpm build、overlay
+     `@omp/client-settings` 并手工符号链接其 9 个 workspace 依赖 + react/@types，
+     再经根 node_modules 的 tsdown 打包插件 bundle（该包不在 pnpm lockfile 内，
+     全仓 pnpm install 会报 ERR_PNPM_OUTDATED_LOCKFILE，故不走 pnpm）。
+- **`@omp/client-settings` 源码归宿**：迁入仓库 `dsh-overlay/packages/client/
+  omp-settings/`（此前唯一副本在未版本化的 vendored 树内）。dsh 树内那份仍是
+  运行时副本；改动应先落 dsh-overlay 再同步进 dsh 树重建。
+- **dsh 根解析顺序**（run-web-mode.ts）：`OMP_WEB_DSH_ROOT` → 仓内 `./dsh-web/`
+  （release 解包布局，.gitignore 已挡）→ 仓旁 `../dsh-web`（工作区布局）。
+- **已知警告**：上游历史自带 `.turbo/cache/*.tar.zst`（53.92 MB）触发 GitHub
+  大文件警告；属上游历史包袱，改写历史换消除的代价不成比例，保留。
