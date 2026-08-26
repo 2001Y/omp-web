@@ -1,0 +1,9 @@
+/* omp contributes ~10 extra settings sections; the nav rail was sized for a
+   handful. Follow the shell's own scrolling convention (see .options): the
+   panel's fixed height constrains the column, min-height:0 lets the flex item
+   shrink, overflow-y:auto engages the panel's inherited --dsh-scrollbar-*
+   thumb styling from ui-theme. No hard-coded max-height. */
+[role="dialog"] nav {
+  min-height: 0;
+  overflow-y: auto;
+}

@@ -344,3 +344,32 @@ Location: `packages/*/CHANGELOG.md` (per package).
 2. Run `bun run release`.
 
 The script handles version bump, CHANGELOG finalization, commit, tag, publish, and adding new `[Unreleased]` sections.
+
+## Web mode (omp-web fork)
+
+This fork adds `--mode web`: a browser GUI served from `packages/web` (host)
+and `packages/coding-agent/src/modes/web` (driver), rendering the vendored
+DeepSeek Harness (dsh) web client stack. Hard constraints for any work on it:
+
+- **A1 — full TUI-replacement scope**, not a demo: sessions, chat rendering,
+  slash commands, settings, model/thinking selection, approvals/interactions,
+  subagents, queues, plan mode.
+- **A2 — no self-made UI components.** Every visual/interactive component
+  comes from the dsh-web client packages. The vendored dsh tree takes zero
+  file modifications; fork presentation lives only in the
+  `@omp/client-settings` overlay plugin (`dsh-overlay/`).
+- **A3 — exceptions need explicit user approval first**, recorded in
+  `docs/web/PROVENANCE.md`; components must consume `--dsw-*` tokens only.
+- **A4 — glue vs. components.** Self-authored code is non-presentation only:
+  protocol/host implementation, data adaptation, boot composition. Glue that
+  starts rendering (JSX/DOM/CSS) violates A2.
+- **A5 — delete violating code immediately**; removal and replacement land in
+  the same delivery.
+- Dependency direction stays acyclic: `coding-agent → @oh-my-pi/web`; the
+  reverse goes only through interface injection in
+  `packages/web/src/protocol/driver.ts`.
+- Upstream files take registration/wiring edits only, each recorded in the
+  relevant CHANGELOG `[Unreleased]`; business logic goes into `packages/web`
+  or `packages/coding-agent/src/modes/web/`.
+
+The full provenance ledger and engineering log live in `docs/web/`.

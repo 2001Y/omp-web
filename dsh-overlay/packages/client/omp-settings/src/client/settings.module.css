@@ -1,0 +1,480 @@
+/* omp settings section + history view layout. Every value follows the dsh
+ * vocabulary: settings rows mirror ui-conversation's EnterBehaviorRow
+ * (16px row padding, 14/22 title, 12/18 tertiary description, 36px capsule
+ * selector on bg-module-platform), dense list rows mirror the trajectory
+ * cell / sidebar session row (13px xs font, radius 8, hover fill), and all
+ * colors are bare --dsw-* tokens (dsh convention: no fallback literals —
+ * a renamed token must fail loudly, not silently render gray). */
+
+/* ===== Shared settings-section vocabulary (EnterBehaviorRow geometry) ===== */
+
+.group {
+  margin-bottom: 8px;
+}
+
+.groupTitle {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.rowText {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 48px;
+}
+
+.title {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.saved {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.desc {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.warning {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* Selector capsule (EnterBehaviorRow .selector): h36, r18, module-platform
+ * fill, no border, 14/22 label. */
+.selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 18px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.selector:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.selector:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.input {
+  max-width: 220px;
+}
+
+.chevron {
+  flex: none;
+}
+
+.tag {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* Model-role block: row + expandable browser. */
+.roleBlock {
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.browser {
+  padding: 4px 0 12px;
+}
+
+.browserSearch {
+  margin-bottom: 8px;
+  max-width: 320px;
+}
+
+.browserList {
+  max-height: 320px;
+  overflow-y: auto;
+  /* The settings panel's inherited --dsh-scrollbar-* thumb styling applies. */
+}
+
+.modelRow,
+.modelRowSelected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+  text-align: left;
+  cursor: pointer;
+}
+
+.modelRow:hover,
+.modelRowSelected {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Trajectory-cell selection: the brand inset ring instead of a second fill. */
+.modelRowSelected {
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+}
+
+.modelName {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.modelMeta {
+  flex: none;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dotOff {
+  flex: none;
+}
+
+/* Field-row controls cluster: value control + reset-to-default. */
+.rowControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.modifiedPill {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+/* Icon-only reset affordance: the 28px capsule form of Button sm. */
+.resetBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.resetBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Tab toolbar: field search + reset-all. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.toolbarSearch {
+  max-width: 320px;
+}
+
+.groupIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  padding: 0 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* ===== History view (TUI /tree parity): canvas-drawn tree + detail pane ===== */
+
+/* The view owns its scrolling: data-conversation-composer-overlay opts it
+   into the full-height view area (the trajectory pattern), so the panes never
+   push the whole tab taller. */
+.historyPanes {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.historyTreePane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 46%;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--dsw-alias-border-l2);
+}
+
+/* Toolbar follows the trajectory toolbar: hairline-separated strip of
+ * 20-22px tertiary controls. */
+.historyToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.historySearch {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Trajectory .toggle language: borderless 12px tertiary control that
+ * darkens on hover. */
+.filterControl {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  gap: 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  cursor: pointer;
+  font: var(--dsw-font-xxs-12);
+}
+
+.filterControl:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The viewport wrapper pins the canvas to the visible area; the scroller
+   fills it and the rows flow inside. */
+.historyTreeViewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.historyTreeScroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  outline: none;
+  /* The floating composer overlaps the view; ConversationRoot publishes its
+    live height so the last rows stay reachable (trajectory pattern). */
+  padding-bottom: calc(var(--dsh-composer-height, 152px) + 16px);
+}
+
+.historyTreeContent {
+  padding-top: 6px;
+}
+
+/* The canvas (dots + connectors) overlays the rows' gutter at viewport size;
+   rows reserve their indent through inline padding-left so text never
+   overlaps a line. It repaints on scroll (Git-graph style). */
+.historyCanvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.historyEmpty {
+  padding: 24px 12px;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Tree rows: the sidebar/trajectory dense-row language — 32px, radius 8,
+ * 13px primary text, hover fill; selection is the trajectory inset ring. */
+.treeRow,
+.treeRowSelected {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 32px;
+  padding-right: 10px;
+  border-radius: 8px;
+  font: var(--dsw-font-xs-13);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.treeRow:hover,
+.treeRowSelected {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.treeRowSelected {
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+}
+
+/* Kind tags: the trajectory cell's 22px tinted tag (radius 6, xs-strong). */
+.kindTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font: var(--dsw-font-xs-strong-13);
+  white-space: nowrap;
+}
+
+.tagUser {
+  color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-state-success-tertiary);
+}
+
+.tagAssistant {
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+.tagDeveloper {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.treeText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
+}
+
+.treeTextMuted {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.treeTextError {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.treeLabelBadge {
+  flex: none;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.historyDetailPane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 54%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  padding-bottom: calc(var(--dsh-composer-height, 152px) + 16px);
+}
+
+.historyTreeHead {
+  padding: 2px 0 8px;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tagAccent {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* Detail body: the trajectory cell card (hairline border, radius 8,
+ * layer-3 fill). */
+.detailBody {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detailLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.actionBar {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Inline choice strip: the TUI's "Summarize branch?" prompt as buttons. */
+.choiceStrip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.choicePrompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}

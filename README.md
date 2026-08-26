@@ -1,3 +1,79 @@
+# omp-web — oh-my-pi with a full browser GUI
+
+> Fork of [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) that adds
+> **`--mode web`**: a complete browser GUI for the agent, built on the
+> [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) web
+> client stack. The GUI is a full TUI replacement surface — session management,
+> streaming chat with tool cards and approvals, slash commands, settings, model
+> & thinking-level selection, plan mode, subagents, and a git-graph History
+> view with rewind/fork.
+
+<p align="center">
+  <img src="docs/web/screenshots/chat.webp" alt="omp-web chat" width="48%">
+  <img src="docs/web/screenshots/history.webp" alt="omp-web history tree" width="48%">
+</p>
+
+## Install & run
+
+Prerequisites: [Bun](https://bun.sh) ≥ 1.4. Node ≥ 22.19 and pnpm 11.7 are
+only needed if you build the dsh runtime from source (option B).
+
+```sh
+git clone https://github.com/LaneSun/omp-web.git
+cd omp-web
+bun install
+```
+
+The browser stack is served from a **dsh-web runtime tree** (MIT-licensed,
+pinned baseline). Pick one:
+
+**A. Prebuilt runtime (recommended)** — download `dsh-web-runtime-*.tar.gz`
+from the [latest release](https://github.com/LaneSun/omp-web/releases) and
+extract it as `dsh-web/` inside this repo (auto-detected):
+
+```sh
+curl -fsSL <release-tarball-url> | tar -xz -C dsh-web --strip-components=0  # creates ./dsh-web
+```
+
+**B. Source build** — clone deepseek-harness at the pinned baseline, overlay
+the fork's `@omp/client-settings` plugin, and build everything:
+
+```sh
+scripts/setup-dsh-web.sh            # clones + builds into ./dsh-web
+```
+
+Then start the web mode:
+
+```sh
+bun packages/coding-agent/src/cli.ts --mode web
+# → http://127.0.0.1:3180
+```
+
+Configuration: `OMP_WEB_PORT` (default 3180), `OMP_WEB_DSH_ROOT` (default:
+`./dsh-web` if built/extracted there, else `../dsh-web`).
+
+## Repository layout
+
+| Path | What |
+| --- | --- |
+| `packages/web/` | `@oh-my-pi/web` — the Bun host: boot graph, `/api` RPC carrier, downlink WebSocket, static + plugin-bundle serving (glue port of the dsh host, no presentation code) |
+| `packages/coding-agent/src/modes/web/` | `OmpWebDriver` — maps OMP sessions/events/settings onto the dsh client contract |
+| `dsh-overlay/` | The fork's dsh-side plugin source (`@omp/client-settings`: settings sections + History view) |
+| `scripts/setup-dsh-web.sh` | Source-build the dsh runtime (pinned deepseek-harness + overlay) |
+| `scripts/package-dsh-runtime.ts` | Pack the runtime tarball shipped on the Releases page |
+| `docs/web/PROVENANCE.md` | Component provenance ledger (A2/A3 records, Chinese) |
+| `docs/web/NOTES.md` | Engineering log & design decisions (Chinese) |
+
+The vendored dsh tree carries **zero file modifications**; every adaptation is
+host-side glue or the overlay plugin. See `docs/web/PROVENANCE.md` for the
+enforced rules.
+
+Both upstreams are MIT-licensed, as is this fork (see `LICENSE`).
+
+---
+
+<!-- upstream README follows -->
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>

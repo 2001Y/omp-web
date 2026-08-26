@@ -1,0 +1,163 @@
+/**
+ * `omp.history` namespace dictionaries: the History view's chrome. Entry
+ * VALUES (message text, tool summaries, model names) are wire data and stay
+ * verbatim; only this plugin's own labels, notices, and role/kind prefixes
+ * localize, following the dsh locale plugin's zh/en dictionary pattern.
+ */
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+
+/** Dictionary namespace owned by this plugin's History view. */
+export const NS = 'omp.history'
+
+/** Simplified Chinese dictionary (the key-set source of truth). */
+export const zh = {
+  'tab.history': '历史',
+  'pane.tree': '会话树',
+  'pane.detail': '详情',
+  'search.placeholder': '搜索…',
+  'search.label': '搜索历史',
+  'filter.label': '过滤模式',
+  'filter.default': '默认',
+  'filter.noTools': '无工具',
+  'filter.userOnly': '仅用户',
+  'filter.labeledOnly': '仅有标签',
+  'filter.all': '全部',
+  'hint.keys': '↑/↓ 选择 · Enter 回退 · 输入即搜索',
+  'empty.none': '没有条目',
+  'empty.search': '没有匹配“{query}”的条目',
+  'empty.filter': '{count} 个条目被当前过滤器隐藏',
+  'loading': '加载中…',
+  'detail.select': '在树中选择一个条目。',
+  'detail.currentPath': '当前路径',
+  'detail.otherPath': '其他路径',
+  'detail.label': '标签',
+  'detail.noLabel': '无',
+  'detail.timestamp': '时间',
+  'action.rewind': '回退到此处',
+  'action.rewindBusy': '回退中…',
+  'action.fork': '在此分叉',
+  'action.forkBusy': '分叉中…',
+  'action.label': '设置标签',
+  'action.labelSave': '保存',
+  'action.labelClear': '清除',
+  'action.labelCancel': '取消',
+  'label.placeholder': '标签（留空即清除）',
+  'summary.question': '生成分支摘要？',
+  'summary.no': '不生成摘要',
+  'summary.yes': '生成摘要',
+  'summary.custom': '自定义提示生成摘要',
+  'summary.customPromptPlaceholder': '自定义摘要指令…',
+  'summary.cancel': '取消',
+  'summary.busy': '正在生成摘要…（Esc 取消暂不支持）',
+  'notice.rewoundEditor': '已回退 — 消息已放入输入框编辑。',
+  'notice.rewound': '已回退 — 会话从所选条目继续。',
+  'notice.already': '已在此位置',
+  'notice.forked': '已分叉为新会话 — 见侧栏。',
+  'notice.labelSaved': '标签已保存',
+  'notice.summaryAborted': '分支摘要已取消',
+  'role.user': '用户',
+  'role.assistant': '助手',
+  'role.developer': '开发者',
+  'role.tool': '工具',
+  'state.aborted': '（已中止）',
+  'state.noContent': '（无内容）',
+  'state.default': '（默认）',
+  'kind.compaction': '压缩',
+  'kind.compactionTokens': '{count} tokens',
+  'kind.branchSummary': '分支摘要',
+  'kind.model': '模型',
+  'kind.thinking': '思考',
+  'kind.serviceTier': '服务层级',
+  'kind.title': '标题',
+  'kind.mode': '模式',
+  'kind.credentialPin': '凭据锁定',
+  'kind.ttsrInjection': 'TTSR 注入',
+  'kind.resetBoundary': '重置边界',
+  'kind.sessionInit': '会话初始化',
+  'kind.custom': '自定义',
+  'kind.label': '标签',
+  'kind.bash': 'bash',
+} satisfies Record<string, string>
+
+/** English dictionary. */
+export const en: typeof zh = {
+  'tab.history': 'History',
+  'pane.tree': 'Session tree',
+  'pane.detail': 'Details',
+  'search.placeholder': 'Search…',
+  'search.label': 'Search history',
+  'filter.label': 'Filter mode',
+  'filter.default': 'Default',
+  'filter.noTools': 'No tools',
+  'filter.userOnly': 'User only',
+  'filter.labeledOnly': 'Labeled only',
+  'filter.all': 'All',
+  'hint.keys': '↑/↓ select · Enter rewind · type to search',
+  'empty.none': 'No entries found',
+  'empty.search': 'No entries match "{query}"',
+  'empty.filter': '{count} entries hidden by the current filter',
+  'loading': 'Loading…',
+  'detail.select': 'Select an entry in the tree.',
+  'detail.currentPath': 'current path',
+  'detail.otherPath': 'other path',
+  'detail.label': 'Label',
+  'detail.noLabel': 'none',
+  'detail.timestamp': 'Time',
+  'action.rewind': 'Rewind here',
+  'action.rewindBusy': 'Rewinding…',
+  'action.fork': 'Fork here',
+  'action.forkBusy': 'Forking…',
+  'action.label': 'Set label',
+  'action.labelSave': 'Save',
+  'action.labelClear': 'Clear',
+  'action.labelCancel': 'Cancel',
+  'label.placeholder': 'Label (empty to remove)',
+  'summary.question': 'Summarize branch?',
+  'summary.no': 'No summary',
+  'summary.yes': 'Summarize',
+  'summary.custom': 'Summarize with custom prompt',
+  'summary.customPromptPlaceholder': 'Custom summarization instructions…',
+  'summary.cancel': 'Cancel',
+  'summary.busy': 'Summarizing branch…',
+  'notice.rewoundEditor': 'Rewound — the message is in the composer for editing.',
+  'notice.rewound': 'Rewound — the session continues from the selected entry.',
+  'notice.already': 'Already at this point',
+  'notice.forked': 'Forked as a new session — find it in the sidebar.',
+  'notice.labelSaved': 'Label saved',
+  'notice.summaryAborted': 'Branch summarization cancelled',
+  'role.user': 'user',
+  'role.assistant': 'assistant',
+  'role.developer': 'developer',
+  'role.tool': 'tool',
+  'state.aborted': '(aborted)',
+  'state.noContent': '(no content)',
+  'state.default': '(default)',
+  'kind.compaction': 'compaction',
+  'kind.compactionTokens': '{count} tokens',
+  'kind.branchSummary': 'branch summary',
+  'kind.model': 'model',
+  'kind.thinking': 'thinking',
+  'kind.serviceTier': 'service tier',
+  'kind.title': 'title',
+  'kind.mode': 'mode',
+  'kind.credentialPin': 'credential pin',
+  'kind.ttsrInjection': 'ttsr injection',
+  'kind.resetBoundary': 'reset boundary',
+  'kind.sessionInit': 'session init',
+  'kind.custom': 'custom',
+  'kind.label': 'label',
+  'kind.bash': 'bash',
+}
+
+/** The History view's dictionary key union. */
+export type HistoryKey = keyof typeof zh
+
+/** The History view's typed translate seat (framework-injected via `locale:`). */
+export type HistoryT = TranslateNS<'omp.history'>
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** The History view's chrome (omp web plugin). */
+    'omp.history': HistoryKey
+  }
+}

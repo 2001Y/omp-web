@@ -94,3 +94,6 @@ packages/coding-agent/bench/boot-baseline.json
 /.bazelrc.user
 
 .parity/
+
+# omp-web: local dsh-web runtime tree (release tarball extract or source build)
+/dsh-web/
