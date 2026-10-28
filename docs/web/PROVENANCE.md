@@ -308,3 +308,14 @@ blue-950 は deep-diving 混色の相方として温色化、文書選択色も�
 サフィックス（`_previewBadge`、ビルド間で安定）に対する display:none を
 採用。DSH がクラス名を変更したら規則は静かに無効化されバッジが戻るだけ
 で、他は壊れない劣化方式。自動追従（週次 bump）でもこの方式は維持される。
+
+### 認証無効化オプション（2026-10-28）
+
+Mac mini 実配備からの要請で、ネットワーク層がピアを認証する構成
+（loopback バインド＋tailnet 限定プロキシ）向けに、起動トークン／
+Cookie 認証を切る `OMP_WEB_NO_AUTH` と、プロキシ先の権威を信託柵へ
+伝える `OMP_WEB_TRUSTED_HOSTS` を追加（いずれも run-web-mode の env
+読み取り→ WebServerOptions.noAuth / trustedHosts への配線のみ）。
+DNS リバインディング対策の信託柵は無効化対象外で、未登録ホストは
+従来通り 403。既定は従来動作（認証あり）。VM 実測：トークンなし `/`
+→200、tailnet ホストでの mux →426（ゲート通過）、悪性ホスト→403。

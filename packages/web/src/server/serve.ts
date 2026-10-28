@@ -47,6 +47,13 @@ export interface WebServerOptions {
 	roster?: readonly string[];
 	/** Auth-secret file; defaults to `~/.omp/agent/web-auth.key`. */
 	authSecretPath?: string;
+	/**
+	 * Disable launch-token/cookie authentication (the DNS-rebinding trust
+	 * fence still applies). For deployments where the network layer already
+	 * authenticates peers — e.g. the server is reachable only through a
+	 * tailnet-only proxy on a loopback bind. Off by default.
+	 */
+	noAuth?: boolean;
 }
 
 /** Running server handle. */
@@ -99,6 +106,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	const { boot, indexHtml } = await prepareBootAssets(options.dshRoot, options.roster);
 	const secretPath = options.authSecretPath ?? path.join(os.homedir(), ".omp", "agent", "web-auth.key");
 	const auth = new BrowserAuth(await loadOrCreateAuthSecret(secretPath));
+	const noAuth = options.noAuth ?? false;
+	const isAuthenticated = (headers: Headers): boolean => noAuth || auth.authenticate(headers) !== undefined;
 	const dispatcher = createRemoteDispatcher(options.driver);
 	const streams = new RemoteStreams(options.driver);
 	const distRoot = path.join(options.dshRoot, "apps", "web", "dist");
@@ -149,7 +158,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	const url = `http://${hostname}:${String(server.port)}`;
 	return {
 		url,
-		accessUrl: `${url}/?token=${auth.launchToken}`,
+		accessUrl: noAuth ? `${url}/` : `${url}/?token=${auth.launchToken}`,
 		port: server.port ?? port,
 		stop: async (): Promise<void> => {
 			clearInterval(liveness);
@@ -167,7 +176,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			return handleApi(req, srv, rawPathname);
 		}
 		if (rawPathname === "/" || rawPathname === "/index.html") return handleIndex(req, requestUrl);
-		if (auth.authenticate(req.headers) === undefined) {
+		if (!isAuthenticated(req.headers)) {
 			return new Response("unauthorized", { status: 401 });
 		}
 		if (rawPathname.startsWith("/plugins/")) {
@@ -210,7 +219,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				headers: { location: "/", "set-cookie": auth.mintCookie(authority, 1) },
 			});
 		}
-		if (auth.authenticate(req.headers) === undefined) {
+		if (!isAuthenticated(req.headers)) {
 			return new Response("unauthorized", { status: 401 });
 		}
 		return new Response(indexHtml, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
@@ -226,7 +235,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				headers: { location: "/", "set-cookie": auth.mintCookie(authority, 2, crypto.randomUUID()) },
 			});
 		}
-		if (auth.authenticate(req.headers) !== undefined) {
+		if (isAuthenticated(req.headers)) {
 			return new Response(null, { status: 303, headers: { location: "/" } });
 		}
 		return new Response("unauthorized", { status: 401 });
@@ -240,7 +249,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		if (!isTrustedApiRequest(req.headers, trustedHosts)) {
 			return new Response("forbidden", { status: 403 });
 		}
-		if (auth.authenticate(req.headers) === undefined) {
+		if (!isAuthenticated(req.headers)) {
 			return new Response("unauthorized", { status: 401 });
 		}
 		if (rawPathname === `${API_PATH}/session.export`) {

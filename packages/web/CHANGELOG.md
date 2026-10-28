@@ -10,6 +10,7 @@
 ### Added (dsh 0.2.x port)
 
 - `scripts/setup-dsh-web.sh` prepares a stock dsh tree for web mode without modifying it (the overlay directory is the only addition), with `OMP_WEB_DSH_BUILD=lib-web` for small machines.
+- Web mode can run without launch-token authentication for network-authenticated deployments: `OMP_WEB_NO_AUTH=1` disables the token/cookie gate (the DNS-rebinding trust fence stays in force), and `OMP_WEB_TRUSTED_HOSTS` (comma-separated) tells the fence the authorities a proxy serves the UI on — e.g. a tailnet-only Tailscale Serve endpoint.
 - Web mode presents the OMP Web brand: the standalone `@omp/client-brand` overlay plugin fills the sidebar and conversation-hero brand slots with a geometric π mark and an OMP + WEB badge lockup, layers OMP's gold (`#febc38`) over the theme's whole accent family (brand tokens and the deepseek scale they reference, so links, info actions, and the composer send button follow), hides the hero's stock Preview badge, and the host serves the matching page title, favicons, and app-manifest name — the vendored tree stays unmodified.
 
 ### Fixed (omp-web M18)

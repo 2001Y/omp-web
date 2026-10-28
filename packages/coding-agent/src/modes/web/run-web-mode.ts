@@ -45,6 +45,11 @@ export async function runWebMode(
 	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
 ): Promise<never> {
 	const preferredPort = Number.parseInt(process.env.OMP_WEB_PORT ?? "", 10) || DEFAULT_WEB_PORT;
+	const noAuth = /^(?:1|true)$/i.test(process.env.OMP_WEB_NO_AUTH ?? "");
+	const trustedHosts = (process.env.OMP_WEB_TRUSTED_HOSTS ?? "")
+		.split(",")
+		.map(host => host.trim())
+		.filter(host => host !== "");
 	const driver = new OmpWebDriver(session);
 	const uiContext = new WebExtensionUIContext(driver);
 	// Light up the tool context store (ask tool etc.) ...
@@ -72,6 +77,8 @@ export async function runWebMode(
 			driver,
 			dshRoot: resolveDshRoot(),
 			port: preferredPort,
+			noAuth,
+			trustedHosts,
 		});
 	} catch (error) {
 		// Occupied fixed port: fall back to an OS-assigned one instead of dying.
@@ -82,7 +89,12 @@ export async function runWebMode(
 			driver,
 			dshRoot: resolveDshRoot(),
 			port: 0,
+			noAuth,
+			trustedHosts,
 		});
+	}
+	if (noAuth) {
+		logger.warn("omp-web: authentication disabled by OMP_WEB_NO_AUTH; relying on network-layer trust");
 	}
 	process.stdout.write(`omp web: ${server.accessUrl}\n`);
 	// Park until SIGINT/SIGTERM or an extension-requested shutdown; signal
