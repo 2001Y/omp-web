@@ -351,16 +351,27 @@ export class RemoteStreams {
 			if (endpoint === "workspace/follow") {
 				state.subs.set(streamId, { kind: "workspace" });
 				const { workspaces, archivedSessionIds } = await this.#driver.listWorkspaces();
+				// The rc2 frame is a `baseline` whose value carries `items`
+				// (WorkspaceView: ISO-8601 instants), not the 0.1.x `snapshot`
+				// shape — the client silently drops the old frame, which left
+				// the sidebar empty on every fresh page load.
 				this.#sendItem(socket, streamId, {
-					type: "snapshot",
-					workspaces: workspaces.map(workspace => ({
-						workspaceId: workspace.workspaceId,
-						path: workspace.path,
-						title: workspace.title,
-						sessionIds: workspace.sessionIds,
-						updatedAt: workspace.updatedAt,
-					})),
-					archivedSessionIds,
+					type: "baseline",
+					value: {
+						items: workspaces.map(workspace => {
+							const updatedAt = new Date(workspace.updatedAt).toISOString();
+							return {
+								workspaceId: workspace.workspaceId,
+								path: workspace.path,
+								title: workspace.title,
+								sessionIds: workspace.sessionIds,
+								createdAt: updatedAt,
+								updatedAt,
+							};
+						}),
+						archivedSessionIds,
+						pinnedSessionIds: [],
+					},
 				});
 				return;
 			}
