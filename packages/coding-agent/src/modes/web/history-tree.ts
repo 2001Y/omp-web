@@ -13,8 +13,8 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { WebHistoryNode } from "@oh-my-pi/web";
 import type { SessionEntry } from "../../session/session-entries";
 import { toPathList } from "../../tools/path-utils";
-import { shortenPath } from "../../tools/render-utils";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
+import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
 import { resolveAssistantErrorPresentation } from "../utils/transcript-render-helpers";
 
 /** The text budget the TUI applies to tree-row content. */
