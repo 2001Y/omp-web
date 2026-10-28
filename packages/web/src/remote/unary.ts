@@ -350,6 +350,86 @@ async function dispatchOmpHistory(driver: WebDriver, method: string, args: Args)
 }
 
 /**
+ * Workspace registry verbs (`workspace/*`): the driver's registry surface
+ * backs the picker, sidebar ordering and renaming, and session archival.
+ * Verbs with no driver counterpart (initializeDefault, pin/unpin,
+ * unarchive) answer methodUnavailable rather than being approximated.
+ */
+async function dispatchWorkspace(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
+	// Every workspace verb takes one request object, which the wire carries
+	// nested as `args.request` (scalar-param namespaces ride flat instead).
+	const request = args.request;
+	const req: Args =
+		typeof request === "object" && request !== null && !Array.isArray(request) ? (request as Args) : {};
+	switch (method) {
+		case "create": {
+			const path = stringArg(req, "path");
+			if (path === undefined) return fail("gateway/arguments-invalid", "omp-web: workspace/create requires path");
+			return ok(await driver.createWorkspace(path));
+		}
+		case "rename": {
+			const workspaceId = stringArg(req, "workspaceId");
+			const title = stringArg(req, "title");
+			if (workspaceId === undefined || title === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: workspace/rename requires workspaceId, title");
+			}
+			return ok(await driver.renameWorkspace(workspaceId, title));
+		}
+		case "delete": {
+			const workspaceId = stringArg(req, "workspaceId");
+			if (workspaceId === undefined) return fail("gateway/arguments-invalid", "omp-web: workspace/delete requires workspaceId");
+			return ok(await driver.deleteWorkspace(workspaceId));
+		}
+		case "insertBefore": {
+			const workspaceId = stringArg(req, "workspaceId");
+			if (workspaceId === undefined) return fail("gateway/arguments-invalid", "omp-web: workspace/insertBefore requires workspaceId");
+			return ok(await driver.insertWorkspaceBefore(workspaceId, stringArg(req, "beforeWorkspaceId")));
+		}
+		case "insertSessionBefore": {
+			const workspaceId = stringArg(req, "workspaceId");
+			const sessionId = stringArg(req, "sessionId");
+			if (workspaceId === undefined || sessionId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: workspace/insertSessionBefore requires workspaceId, sessionId");
+			}
+			return ok(await driver.insertSessionBefore(workspaceId, sessionId, stringArg(req, "beforeSessionId")));
+		}
+		case "archiveSession": {
+			const sessionId = stringArg(req, "sessionId");
+			if (sessionId === undefined) return fail("gateway/arguments-invalid", "omp-web: workspace/archiveSession requires sessionId");
+			return ok(await driver.archiveSession(sessionId));
+		}
+		default:
+			return { ok: false, error: methodUnavailable(`workspace/${method}`) };
+	}
+}
+
+/**
+ * Host directory browsing for the workspace picker (`directoryPicker/*`):
+ * the browse composition's list/createDirectory primitives over the
+ * driver's filesystem surface. The native `pick` verb has no web
+ * counterpart (there is no OS chooser behind a browser) and answers
+ * methodUnavailable.
+ */
+async function dispatchDirectoryPicker(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
+	switch (method) {
+		case "list":
+			return ok(await driver.listDirectory(stringArg(args, "path")));
+		case "createDirectory": {
+			const path = stringArg(args, "path");
+			const name = stringArg(args, "name");
+			if (path === undefined || name === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: directoryPicker/createDirectory requires path, name");
+			}
+			const created = await driver.createDirectory(path, name);
+			// The wire contract returns the created path as a bare string.
+			return ok(created.path);
+		}
+		default:
+			return { ok: false, error: methodUnavailable(`directoryPicker/${method}`) };
+	}
+}
+
+/**
  * The dynamic cordis runner surface. This host loads its plugin set
  * statically at boot (the boot graph), so there is no dynamic inventory to
  * report and inspect manifests are accepted with nothing to register —
@@ -408,6 +488,8 @@ export function createRemoteDispatcher(driver: WebDriver): {
 				if (namespace === "ompSettings") return respond(await dispatchOmpSettings(driver, method, payload.args));
 				if (namespace === "ompHistory") return respond(await dispatchOmpHistory(driver, method, payload.args));
 				if (namespace === "dynamicCordisRunner") return respond(dispatchDynamicCordisRunner(method));
+				if (namespace === "workspace") return respond(await dispatchWorkspace(driver, method, payload.args));
+				if (namespace === "directoryPicker") return respond(await dispatchDirectoryPicker(driver, method, payload.args));
 				return respond({ ok: false, error: serviceUnavailable(endpoint) });
 			} catch (error) {
 				return respond({

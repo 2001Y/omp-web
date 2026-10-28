@@ -22,6 +22,7 @@
 - `clientSettings/mutate` honors nested `path` arrays (prototype-pollution segments refused) and writes the store atomically (temp file + rename).
 - `settings.mutate`-adjacent hardening: `fileReferences/list` refuses `..`/absolute path segments escaping the session cwd.
 - `redactedThinking` blocks no longer render their provider-opaque blob as reasoning text.
+- The hero's "Choose workspace" flow works: the unary dispatcher now routes `workspace/*` (create/rename/delete/ordering/session archive) and `directoryPicker/*` (directory list/create for the browse picker) to the driver instead of answering `gateway/service-unavailable` for both namespaces, and the boot roster pins the browse directory-picker client package (the bundle layers only name its host-side `-auto` counterpart, which ships no client face — without the pin the picker's directory-flow slots stay empty and the anchor gesture shows nothing). Host directories can now be browsed and adopted as workspaces.
 
 ### Added (omp-web M18)
 

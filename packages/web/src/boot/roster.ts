@@ -43,6 +43,29 @@ export const BOOT_ROSTER_EXCLUSIONS: ReadonlyArray<{ name: string; reason: strin
 	},
 ];
 
+/**
+ * Packages this host pins into the derived roster directly, with the
+ * reason. The web-app bundle composes its directory picker through the
+ * host-side `-auto` package, which resolves the environment at boot and
+ * mounts the matching face through the Cordis Loader; this host has no
+ * Loader, so the browse face is pinned here instead — the bundle patch's
+ * own instruction ("mount -native or -browse directly in an overlay to
+ * pin the interaction"). The browse face fills the workspace picker's
+ * directory-flow holes over the `directoryPicker/*` + `workspace/create`
+ * verbs this host serves; the native face stays out (it drives a desktop
+ * dialog a web host cannot open). Without the pin the holes stay empty
+ * and, on a profile with no workspaces yet, the picker's anchor gesture
+ * shows nothing at all.
+ */
+export const BOOT_ROSTER_PINS: ReadonlyArray<{ name: string; reason: string }> = [
+	{
+		name: "@deepseek-ai/dsh-client-ui-directory-picker-browse",
+		reason:
+			"the web-app bundle's directory-picker row loads the host-side -auto package (no client face); " +
+			"with no Cordis Loader to mount its browse face, the face is pinned directly",
+	},
+];
+
 /** The fork's own overlay packages, appended to every derived roster (brand first, settings last). */
 export const OVERLAY_PACKAGES: readonly string[] = ["@omp/client-brand", "@omp/client-settings"];
 
@@ -142,7 +165,8 @@ export function parsePatchRows(text: string, profileName: string): PatchRow[] {
 /**
  * Derive the candidate boot roster from the vendored tree's bundle
  * patches: layer-ordered package names with disabled rows dropped,
- * this host's exclusions removed, and the overlay package appended.
+ * this host's exclusions removed, its pins appended, and the overlay
+ * packages last.
  * @param dshRoot - the vendored dsh tree root.
  * @param profileName - profile the roster is for (default `web`).
  * @returns the roster, or undefined when the tree carries no bundle patches
@@ -188,6 +212,11 @@ export async function deriveBootRoster(dshRoot: string, profileName = "web"): Pr
 		if (row.name === undefined || row.disabled === true || excluded.has(row.name) || seen.has(row.name)) continue;
 		seen.add(row.name);
 		roster.push(row.name);
+	}
+	for (const pin of BOOT_ROSTER_PINS) {
+		if (seen.has(pin.name)) continue;
+		seen.add(pin.name);
+		roster.push(pin.name);
 	}
 	roster.push(...OVERLAY_PACKAGES);
 	return roster;

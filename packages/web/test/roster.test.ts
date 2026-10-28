@@ -75,6 +75,11 @@ describe("deriveBootRoster", () => {
 		expect(roster).toContain("@deepseek-ai/dsh-client-ui-session");
 		expect(roster.at(-1)).toBe("@omp/client-settings");
 		expect(roster.at(-2)).toBe("@omp/client-brand");
+		// The browse directory picker is pinned: the patch layers only name
+		// the host-side -auto package, and without the face the workspace
+		// picker's directory-flow holes stay empty (Choose workspace would
+		// offer no way to adopt a directory on a fresh profile).
+		expect(roster).toContain("@deepseek-ai/dsh-client-ui-directory-picker-browse");
 		// Host exclusions and profile-disabled rows are absent.
 		expect(roster).not.toContain("@deepseek-ai/dsh-client-hmr");
 		expect(roster).not.toContain("@deepseek-ai/dsh-client-ui-message-feedback");

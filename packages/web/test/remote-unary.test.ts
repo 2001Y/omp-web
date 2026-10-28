@@ -134,4 +134,44 @@ describe("remote unary dispatcher", () => {
 		expect(value.routableProviders).toEqual(["p"]);
 		expect(value.failures).toEqual([]);
 	});
+
+	test("workspace/create unwraps the request object and answers the adopted workspace", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "workspace/create", { request: { path: "/work" } });
+		if (!response.result.ok) throw new Error("expected ok result");
+		const value = response.result.value as { workspace: { workspaceId: string; title: string }; created: boolean };
+		expect(value.created).toBe(true);
+		expect(value.workspace.workspaceId).toBe("/work");
+		expect(value.workspace.title).toBe("work");
+	});
+
+	test("workspace/create without a request path is an arguments error, not a driver call", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "workspace/create", { request: {} });
+		expect(response.result).toMatchObject({ ok: false, error: { code: "gateway/arguments-invalid" } });
+	});
+
+	test("directoryPicker/list answers the listing shape the browser dialog renders", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "directoryPicker/list", { path: "/home/user/docs" });
+		if (!response.result.ok) throw new Error("expected ok result");
+		const value = response.result.value as { path: string; home: string; entries: unknown[]; truncated: boolean };
+		expect(value.path).toBe("/home/user/docs");
+		expect(value.home).toBe("/home/user");
+		expect(value.entries).toEqual([]);
+		expect(value.truncated).toBe(false);
+	});
+
+	test("directoryPicker/createDirectory answers the created path as a bare string", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "directoryPicker/createDirectory", { path: "/parent", name: "child" });
+		if (!response.result.ok) throw new Error("expected ok result");
+		expect(response.result.value).toBe("/parent/child");
+	});
+
+	test("directoryPicker/pick answers method-unavailable (no OS chooser behind a browser)", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "directoryPicker/pick");
+		expect(response.result).toMatchObject({ ok: false, error: { code: "gateway/method-unavailable" } });
+	});
 });
