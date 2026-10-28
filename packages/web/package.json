@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@oh-my-pi/web",
-	"version": "18.0.4",
+	"version": "18.13.2",
 	"private": true,
 	"description": "Web GUI host for the omp coding agent: serves the vendored dsh-web client stack and bridges the browser RPC contract onto an injected WebDriver",
 	"homepage": "https://omp.sh",
