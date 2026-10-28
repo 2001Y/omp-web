@@ -186,4 +186,44 @@ describe("remote unary dispatcher", () => {
 		const response = await dispatch(driver, "directoryPicker/pick");
 		expect(response.result).toMatchObject({ ok: false, error: { code: "gateway/method-unavailable" } });
 	});
+
+	test("ompSettings/loginStart requires a provider and answers the pending attempt with its sign-in surface", async () => {
+		const driver = fakeDriver();
+		const missing = await dispatch(driver, "ompSettings/loginStart", {});
+		expect(missing.result).toMatchObject({ ok: false, error: { code: "gateway/arguments-invalid" } });
+		const started = await dispatch(driver, "ompSettings/loginStart", { provider: "openai-codex" });
+		if (!started.result.ok) throw new Error("expected ok result");
+		expect(started.result.value).toMatchObject({
+			provider: "openai-codex",
+			state: "pending",
+			auth: { url: "https://example.test/device", instructions: "Enter code: WXYZ-1234" },
+		});
+	});
+
+	test("ompSettings login settles done once the code is submitted; an unknown attempt is an arguments error", async () => {
+		const driver = fakeDriver();
+		const started = await dispatch(driver, "ompSettings/loginStart", { provider: "openai-codex" });
+		if (!started.result.ok) throw new Error("expected ok result");
+		const attemptId = (started.result.value as { attemptId: string }).attemptId;
+		const pending = await dispatch(driver, "ompSettings/loginStatus", { attemptId });
+		if (!pending.result.ok) throw new Error("expected ok result");
+		expect(pending.result.value).toMatchObject({ state: "pending" });
+		await dispatch(driver, "ompSettings/loginSubmitCode", { attemptId, code: "WXYZ-1234" });
+		const done = await dispatch(driver, "ompSettings/loginStatus", { attemptId });
+		if (!done.result.ok) throw new Error("expected ok result");
+		expect(done.result.value).toMatchObject({ state: "done", identity: "user@example.test" });
+		const unknown = await dispatch(driver, "ompSettings/loginStatus", { attemptId: "nope" });
+		expect(unknown.result).toMatchObject({ ok: false, error: { code: "gateway/arguments-invalid" } });
+	});
+
+	test("ompSettings/loginCancel settles the attempt as an error the client can show", async () => {
+		const driver = fakeDriver();
+		const started = await dispatch(driver, "ompSettings/loginStart", { provider: "openai-codex" });
+		if (!started.result.ok) throw new Error("expected ok result");
+		const attemptId = (started.result.value as { attemptId: string }).attemptId;
+		await dispatch(driver, "ompSettings/loginCancel", { attemptId });
+		const status = await dispatch(driver, "ompSettings/loginStatus", { attemptId });
+		if (!status.result.ok) throw new Error("expected ok result");
+		expect(status.result.value).toMatchObject({ state: "error", error: "Login cancelled" });
+	});
 });

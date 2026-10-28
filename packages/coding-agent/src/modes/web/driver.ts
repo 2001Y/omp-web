@@ -16,7 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, UserMessage } from "@oh-my-pi/pi-ai";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+import { getOAuthCredentialProvider, getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { getAgentDir, MAIN_CONFIG_FILENAMES, prompt as promptTemplate, Snowflake, VERSION } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
@@ -24,6 +24,7 @@ import type {
 	WebAskOutcome,
 	WebAskQuestion,
 	WebAskRequest,
+	WebAuthLoginAttempt,
 	WebCommandDescriptor,
 	WebCommandExecution,
 	WebDriver,
@@ -326,6 +327,36 @@ export function pageHistory(
 }
 
 /** The backend the omp web GUI host drives. */
+/** Server-side state of one in-flight provider login (see startAuthLogin). */
+interface AuthLoginAttemptState {
+	id: string;
+	/** Provider the credentials land under (the store target). */
+	provider: string;
+	state: "pending" | "done" | "error";
+	auth?: { url: string; instructions?: string };
+	progress?: string;
+	prompt?: { message: string; secret?: boolean };
+	identity?: string;
+	error?: string;
+	abort: AbortController;
+	codeWaiters: Array<{ resolve: (code: string) => void; reject: (error: Error) => void }>;
+	signalFirst: () => void;
+}
+
+/** Project an attempt record onto its wire snapshot. */
+function authLoginSnapshot(attempt: AuthLoginAttemptState): WebAuthLoginAttempt {
+	return {
+		attemptId: attempt.id,
+		provider: attempt.provider,
+		state: attempt.state,
+		...(attempt.auth !== undefined ? { auth: attempt.auth } : {}),
+		...(attempt.progress !== undefined ? { progress: attempt.progress } : {}),
+		...(attempt.prompt !== undefined ? { prompt: attempt.prompt } : {}),
+		...(attempt.identity !== undefined ? { identity: attempt.identity } : {}),
+		...(attempt.error !== undefined ? { error: attempt.error } : {}),
+	};
+}
+
 export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	readonly #session: AgentSession;
 	readonly #translator = new SessionEventTranslator();
@@ -354,6 +385,8 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	#goalContinuationTurnInFlight = false;
 	#goalSuppressNextContinuation = false;
 	#goalTurnHadToolCalls = false;
+	/** In-flight provider logins started from the Connect section, by attempt id. */
+	readonly #authLoginAttempts = new Map<string, AuthLoginAttemptState>();
 	/** Open synthetic command cards for session-level signals (retry/compaction). */
 	#retryCommandId: string | undefined;
 	#compactionCommandId: string | undefined;
@@ -1128,6 +1161,123 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 
 	async logoutProvider(provider: string): Promise<void> {
 		await this.#session.modelRegistry.authStorage.credentials.remove(provider);
+	}
+
+	async startAuthLogin(provider: string): Promise<WebAuthLoginAttempt> {
+		const providers = getOAuthProviders();
+		const info = providers.find(entry => entry.id === provider && entry.available);
+		if (info === undefined) throw new Error(`omp-web: unknown OAuth provider "${provider}"`);
+		// A remote browser cannot receive a loopback callback, so a dedicated
+		// device-code variant, when one is registered, is the web-viable flow
+		// (its credentials land under the base provider id).
+		const device = provider.endsWith("-device")
+			? undefined
+			: providers.find(entry => entry.id === `${provider}-device` && entry.available);
+		const loginId = device?.id ?? provider;
+		const storesAs = getOAuthCredentialProvider(loginId);
+		for (const attempt of this.#authLoginAttempts.values()) {
+			if (attempt.provider !== storesAs) continue;
+			if (attempt.state === "pending") return authLoginSnapshot(attempt);
+			this.#authLoginAttempts.delete(attempt.id);
+		}
+		const firstSignal = Promise.withResolvers<void>();
+		const attempt: AuthLoginAttemptState = {
+			id: crypto.randomUUID(),
+			provider: storesAs,
+			state: "pending",
+			abort: new AbortController(),
+			codeWaiters: [],
+			signalFirst: () => firstSignal.resolve(),
+		};
+		this.#authLoginAttempts.set(attempt.id, attempt);
+		const parkCode = (message: string, secret?: boolean): Promise<string> => {
+			attempt.prompt = { message, ...(secret ? { secret: true } : {}) };
+			attempt.signalFirst();
+			const parked = Promise.withResolvers<string>();
+			attempt.codeWaiters.push({
+				resolve: code => parked.resolve(code),
+				reject: error => parked.reject(error),
+			});
+			return parked.promise;
+		};
+		const auth = this.#session.modelRegistry.authStorage;
+		void auth.oauth
+			.login(loginId, {
+				onAuth: authInfo => {
+					attempt.auth = {
+						url: authInfo.url,
+						...(authInfo.instructions !== undefined ? { instructions: authInfo.instructions } : {}),
+					};
+					attempt.signalFirst();
+				},
+				onProgress: message => {
+					attempt.progress = message;
+					attempt.signalFirst();
+				},
+				onPrompt: prompt => parkCode(prompt.message, prompt.secret),
+				onManualCodeInput: () => parkCode("Paste the authorization code (or full redirect URL):"),
+				signal: attempt.abort.signal,
+			})
+			.then(async identity => {
+				if (attempt.state !== "pending") return;
+				attempt.state = "done";
+				attempt.prompt = undefined;
+				if (identity?.type === "oauth") {
+					const base = identity.email ?? identity.accountId;
+					const org = identity.orgName ?? identity.orgId;
+					const label = base !== undefined ? (org !== undefined ? `${base} (${org})` : base) : org;
+					if (label !== undefined) attempt.identity = label;
+				} else if (identity?.type === "api_key") {
+					attempt.identity = "API key stored";
+				}
+				attempt.signalFirst();
+				// Re-run the provider's model discovery so the catalog serves
+				// the models the new credential unlocks (the CLI login does
+				// the same; a pre-login cache row would hide them otherwise).
+				try {
+					await this.#session.modelRegistry.refreshProvider(storesAs, "online");
+				} catch (error) {
+					logger.warn(
+						`omp-web: model refresh after ${storesAs} login failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+			})
+			.catch(error => {
+				if (attempt.state !== "pending") return;
+				attempt.state = "error";
+				attempt.error = error instanceof Error ? error.message : String(error);
+				attempt.prompt = undefined;
+				attempt.signalFirst();
+			});
+		// Resolve once the flow publishes its sign-in surface (or settles, or
+		// a generous beat passes) so the response usually carries the URL.
+		await Promise.race([firstSignal.promise, Bun.sleep(12_000)]);
+		return authLoginSnapshot(attempt);
+	}
+
+	async authLoginStatus(attemptId: string): Promise<WebAuthLoginAttempt | undefined> {
+		const attempt = this.#authLoginAttempts.get(attemptId);
+		return attempt === undefined ? undefined : authLoginSnapshot(attempt);
+	}
+
+	async submitAuthCode(attemptId: string, code: string): Promise<void> {
+		const attempt = this.#authLoginAttempts.get(attemptId);
+		if (attempt === undefined) throw new Error(`omp-web: unknown login attempt "${attemptId}"`);
+		const waiters = attempt.codeWaiters.splice(0);
+		attempt.prompt = undefined;
+		for (const waiter of waiters) waiter.resolve(code);
+	}
+
+	async cancelAuthLogin(attemptId: string): Promise<void> {
+		const attempt = this.#authLoginAttempts.get(attemptId);
+		if (attempt === undefined) throw new Error(`omp-web: unknown login attempt "${attemptId}"`);
+		if (attempt.state !== "pending") return;
+		const waiters = attempt.codeWaiters.splice(0);
+		for (const waiter of waiters) waiter.reject(new Error("Login cancelled"));
+		attempt.abort.abort();
+		attempt.state = "error";
+		attempt.error = "Login cancelled";
+		attempt.prompt = undefined;
 	}
 
 	async setModelRole(role: string, selection?: { model: string; thinking?: string }): Promise<void> {

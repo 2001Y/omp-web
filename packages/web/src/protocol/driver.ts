@@ -403,6 +403,18 @@ export interface WebDriver {
 	/** Log out of one provider: clear every stored credential for it (TUI /logout). */
 	logoutProvider(provider: string): Promise<void>;
 	/**
+	 * Start a provider login in-process (TUI /login): runs the provider's own
+	 * OAuth flow against the session credential store and resolves with the
+	 * attempt once the flow publishes its browser sign-in surface.
+	 */
+	startAuthLogin(provider: string): Promise<import("./omp-settings").WebAuthLoginAttempt>;
+	/** Snapshot one login attempt; undefined for an unknown attempt id. */
+	authLoginStatus(attemptId: string): Promise<import("./omp-settings").WebAuthLoginAttempt | undefined>;
+	/** Answer the prompt a login flow is waiting on (authorization code / API key). */
+	submitAuthCode(attemptId: string, code: string): Promise<void>;
+	/** Abort a pending login attempt. */
+	cancelAuthLogin(attemptId: string): Promise<void>;
+	/**
 	 * Assign a model role's target (`model` is the `provider/id` selector with
 	 * an optional thinking effort) or clear the role when `selection` is
 	 * omitted. Throws when the model is not available.

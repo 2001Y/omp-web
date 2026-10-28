@@ -95,6 +95,7 @@ export type {
 } from "./protocol/interactions";
 export { parseApprovalResponse, parseQuestionResponse } from "./protocol/interactions";
 export type {
+	WebAuthLoginAttempt,
 	WebOmpSettingsCatalog,
 	WebSettingField,
 	WebSettingGroup,

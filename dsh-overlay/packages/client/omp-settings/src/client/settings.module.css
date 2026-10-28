@@ -196,6 +196,25 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* Connect login panel: the trajectory detail-card surface under a provider
+ * row while its sign-in attempt runs. */
+.loginBox {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+/* The device-code line the user types into the provider's page: primary
+ * label color at the strong xs metrics so it reads as the one thing to copy. */
+.loginCode {
+  margin-top: 6px;
+  font: var(--dsw-font-xs-strong-13);
+  color: var(--dsw-alias-label-primary);
+  letter-spacing: 0.04em;
+}
+
 /* Tab toolbar: field search + reset-all. */
 .toolbar {
   display: flex;

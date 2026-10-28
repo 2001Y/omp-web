@@ -306,6 +306,41 @@ async function dispatchOmpSettings(driver: WebDriver, method: string, args: Args
 			await driver.logoutProvider(provider);
 			return ok(undefined);
 		}
+		case "loginStart": {
+			const provider = stringArg(args, "provider");
+			if (provider === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/loginStart requires a provider");
+			}
+			return ok(await driver.startAuthLogin(provider));
+		}
+		case "loginStatus": {
+			const attemptId = stringArg(args, "attemptId");
+			if (attemptId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/loginStatus requires an attemptId");
+			}
+			const attempt = await driver.authLoginStatus(attemptId);
+			if (attempt === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/loginStatus names an unknown login attempt");
+			}
+			return ok(attempt);
+		}
+		case "loginSubmitCode": {
+			const attemptId = stringArg(args, "attemptId");
+			const code = stringArg(args, "code");
+			if (attemptId === undefined || code === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/loginSubmitCode requires an attemptId and a code");
+			}
+			await driver.submitAuthCode(attemptId, code);
+			return ok(undefined);
+		}
+		case "loginCancel": {
+			const attemptId = stringArg(args, "attemptId");
+			if (attemptId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/loginCancel requires an attemptId");
+			}
+			await driver.cancelAuthLogin(attemptId);
+			return ok(undefined);
+		}
 		default:
 			return { ok: false, error: methodUnavailable(`ompSettings/${method}`) };
 	}

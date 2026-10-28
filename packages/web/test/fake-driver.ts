@@ -47,6 +47,12 @@ export interface FakeDriverState {
 	ompSettingWrites: Array<{ key: string; value: unknown }>;
 	providerLogouts: string[];
 	modelRoleWrites: Array<{ role: string; selection?: { model: string; thinking?: string } }>;
+	authLogins: Array<{
+		attemptId: string;
+		provider: string;
+		code?: string;
+		cancelled: boolean;
+	}>;
 }
 
 /** One goal view fixture for the goal verbs. */
@@ -103,6 +109,7 @@ export function fakeDriver(overrides: Partial<FakeDriverState> = {}): WebDriver 
 		ompSettingWrites: [],
 		providerLogouts: [],
 		modelRoleWrites: [],
+		authLogins: [],
 		...overrides,
 	};
 	const notify = (event: WebStreamEvent): void => {
@@ -222,6 +229,42 @@ export function fakeDriver(overrides: Partial<FakeDriverState> = {}): WebDriver 
 		},
 		logoutProvider: async provider => {
 			state.providerLogouts.push(provider);
+		},
+		startAuthLogin: async provider => {
+			const attempt = { attemptId: `attempt-${state.authLogins.length + 1}`, provider, cancelled: false };
+			state.authLogins.push(attempt);
+			return {
+				attemptId: attempt.attemptId,
+				provider,
+				state: "pending",
+				auth: { url: "https://example.test/device", instructions: "Enter code: WXYZ-1234" },
+			};
+		},
+		authLoginStatus: async attemptId => {
+			const attempt = state.authLogins.find(entry => entry.attemptId === attemptId);
+			if (attempt === undefined) return undefined;
+			if (attempt.cancelled) {
+				return { attemptId, provider: attempt.provider, state: "error", error: "Login cancelled" };
+			}
+			if (attempt.code !== undefined) {
+				return { attemptId, provider: attempt.provider, state: "done", identity: "user@example.test" };
+			}
+			return {
+				attemptId,
+				provider: attempt.provider,
+				state: "pending",
+				auth: { url: "https://example.test/device", instructions: "Enter code: WXYZ-1234" },
+			};
+		},
+		submitAuthCode: async (attemptId, code) => {
+			const attempt = state.authLogins.find(entry => entry.attemptId === attemptId);
+			if (attempt === undefined) throw new Error(`omp-web: unknown login attempt "${attemptId}"`);
+			attempt.code = code;
+		},
+		cancelAuthLogin: async attemptId => {
+			const attempt = state.authLogins.find(entry => entry.attemptId === attemptId);
+			if (attempt === undefined) throw new Error(`omp-web: unknown login attempt "${attemptId}"`);
+			attempt.cancelled = true;
 		},
 		setModelRole: async (role, selection) => {
 			state.modelRoleWrites.push({ role, selection });

@@ -76,6 +76,26 @@ export interface WebProviderAccount {
 	credentialCount: number;
 }
 
+/**
+ * One provider login started from the Connect section (the host runs the
+ * provider's own OAuth flow; the browser only carries the sign-in itself).
+ */
+export interface WebAuthLoginAttempt {
+	attemptId: string;
+	/** Provider the login authenticates (the credential store target). */
+	provider: string;
+	state: "pending" | "done" | "error";
+	/** Browser sign-in surface, present once the flow publishes it. */
+	auth?: { url: string; instructions?: string };
+	/** Latest progress line reported by the flow. */
+	progress?: string;
+	/** A prompt the flow is waiting on (an authorization code, an API key…). */
+	prompt?: { message: string; secret?: boolean };
+	/** Formatted account identity once done (email, optionally with org). */
+	identity?: string;
+	error?: string;
+}
+
 /** The full catalog served by `ompSettings/describe`. */
 export interface WebOmpSettingsCatalog {
 	tabs: WebSettingTab[];

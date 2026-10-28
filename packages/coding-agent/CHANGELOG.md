@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (omp-web)
+
+- Web mode: provider login no longer requires the terminal — the driver runs the provider's OAuth flow against the session credential store (the device-code variant is preferred, since a remote browser cannot receive a loopback callback) and refreshes the provider's model discovery when the login lands.
+
 ## [18.13.2] - 2026-10-27
 ### Changed (omp-web packaging)
 
