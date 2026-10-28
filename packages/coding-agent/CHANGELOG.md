@@ -6,6 +6,10 @@
 
 - Web mode: provider login no longer requires the terminal — the driver runs the provider's own OAuth flow against the session credential store (a remote browser cannot receive the loopback callback, so the panel answers the flow's manual-input prompt with the final redirect URL or code) and refreshes the provider's model discovery when the login lands.
 
+### Fixed (omp-web)
+
+- Web mode: opening or picking a model for a session from another workspace no longer fails with "switchSession was refused" — the driver now accepts the target session's working directory during a switch (a session whose directory is gone still refuses cleanly).
+
 ## [18.13.2] - 2026-10-27
 ### Changed (omp-web packaging)
 

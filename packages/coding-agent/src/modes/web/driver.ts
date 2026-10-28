@@ -2997,7 +2997,22 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		// A parked ask from a pre-fix turn would otherwise replay as a zombie on
 		// every reconnect; the leaving session settles its gates.
 		this.#emit({ kind: "cancel-asks", sessionId: this.#session.sessionId, reason: "omp-web: session switched" });
-		const switched = await this.#session.switchSession(info.path);
+		// Without an onCwdChange decision, AgentSession refuses EVERY switch
+		// whose recorded cwd differs from the attached session's — which is
+		// the normal case here (the boot session lives in the serve tree,
+		// user sessions in their workspaces). Accept the target's cwd and
+		// move the process with it, like the TUI's applyCwdChange; a vanished
+		// directory returns false, and the switch rolls back untouched.
+		const switched = await this.#session.switchSession(info.path, {
+			onCwdChange: async newCwd => {
+				try {
+					process.chdir(newCwd);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+		});
 		if (!switched) {
 			throw new Error(`omp-web: switchSession was refused for ${sessionId}`);
 		}
