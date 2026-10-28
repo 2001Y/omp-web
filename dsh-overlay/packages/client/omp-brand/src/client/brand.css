@@ -32,3 +32,14 @@
   letter-spacing: 0.12em;
   line-height: 1;
 }
+
+/* The conversation hero's Preview badge has no slot, setting, or token —
+   this is the one stock brand surface the composition cannot reach
+   declaratively. Hide it as part of the brand profile. The generated
+   class keeps the authored name as its suffix across builds, so the
+   selector survives dsh updates that reshuffle the hash; if a future
+   dsh renames the class, the rule stops matching and the badge returns
+   — nothing else breaks. */
+span[class$="_previewBadge"] {
+  display: none;
+}

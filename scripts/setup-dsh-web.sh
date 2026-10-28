@@ -54,8 +54,8 @@ pnpm --dir "$TARGET" install --frozen-lockfile
 
 # Product title for the web shell: the tree's vite build projects
 # DSH_CLIENT_TITLE into the document title and the client's runtime
-# product title (ui-layout). This fork's product is OMP Harness.
-export DSH_CLIENT_TITLE="${OMP_WEB_TITLE:-OMP Harness}"
+# product title (ui-layout). This fork's product is OMP Web.
+export DSH_CLIENT_TITLE="${OMP_WEB_TITLE:-OMP Web}"
 
 echo "==> pnpm build (default: full build; OMP_WEB_DSH_BUILD=lib-web skips the aggregate check gates for small machines)"
 if [ "${OMP_WEB_DSH_BUILD:-}" = "lib-web" ]; then

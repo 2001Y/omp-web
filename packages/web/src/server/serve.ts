@@ -82,7 +82,7 @@ async function prepareBootAssets(
 	// title ("DSH Local Build" / the official product name) never ships.
 	const indexHtml = renderIndexInjections(rawIndex, bootInjections(boot.graph)).replace(
 		/<title>[^<]*<\/title>/,
-		"<title>OMP Harness</title>",
+		"<title>OMP Web</title>",
 	);
 	return { boot, indexHtml };
 }
@@ -193,7 +193,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				string,
 				unknown
 			>;
-			manifest.name = "OMP Harness";
+			manifest.name = "OMP Web";
 			manifest.short_name = "OMP";
 			return Response.json(manifest);
 		}

@@ -1,7 +1,7 @@
 /**
  * OMP Harness brand occupants for the generic browser-brand slots — a
  * pastiche of the official DeepSeek Harness lockup (mark + wordmark +
- * HARNESS badge) rebuilt for OMP, under the fork's overlay rule: the
+ * WEB badge) rebuilt for OMP, under the fork's overlay rule: the
  * vendored tree stays unmodified and colors come only from `--dsw-*`
  * tokens (the OMP gold itself arrives as a theme-token layer, see
  * index.ts) — the mark paints in `--dsw-alias-brand-primary`.
@@ -57,16 +57,18 @@ export function OmpBrandMark({ size = 24, className }: OmpBrandMarkProps) {
 }
 
 /**
- * Render the brand name: the OMP wordmark typeset beside a HARNESS badge,
+ * Render the brand name: the OMP wordmark typeset beside a WEB badge,
  * mirroring the official lockup's badge grammar (inverted letters on a
  * filled rounded rect) with typeset text instead of letterform artwork.
+ * The badge names the surface, not the product: OMP is already the
+ * harness, so this composition is OMP's Web face.
  * @returns the wordmark element (aria-hidden decorative brand art).
  */
 export function OmpBrandName() {
   return (
     <span className="omp-brand-name" aria-hidden="true">
       <span className="omp-brand-name-text">OMP</span>
-      <span className="omp-brand-name-badge">HARNESS</span>
+      <span className="omp-brand-name-badge">WEB</span>
     </span>
   )
 }

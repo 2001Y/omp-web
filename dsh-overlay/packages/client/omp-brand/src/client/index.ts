@@ -1,5 +1,5 @@
 /**
- * OMP Harness brand plugin: fills the generic browser-brand slots (sidebar
+ * OMP Web brand plugin: fills the generic browser-brand slots (sidebar
  * mark/name, conversation hero mark) with the OMP lockup and layers the OMP
  * colors over the theme's brand tokens. This is the fork's counterpart to
  * the tree's ui-brand-official — a standalone plugin the host rosters by
@@ -25,14 +25,44 @@ export const inject = ['slots', 'theme']
 /**
  * The OMP color layer, stacked over the active base palette through the
  * theme service's override seam (the base theme stays untouched; removing
- * this plugin removes the layer). Values are OMP's own: the TUI accent
- * #febc38. Brand text deepens the same gold on the light palette, where
- * the raw accent is illegible as text.
+ * this plugin removes the layer). The whole accent family is re-based on
+ * OMP's gold (the TUI accent #febc38):
+ *
+ * - the brand tokens proper (primary actions; the badge and mark paint
+ *   from them, with a deep warm near-black as the on-brand label);
+ * - the send button's token, which the light palette carries as a
+ *   literal blue instead of a scale reference;
+ * - the deepseek static scale itself, re-hued step for step — every
+ *   alias that referenced the blue scale (links, info buttons, business
+ *   states, message bubbles, sidebar accents, the deep-diving mixes)
+ *   follows from the palette root instead of being chased surface by
+ *   surface. Light steps deepen toward the text end, where the raw gold
+ *   is illegible on white; dark steps stay vivid.
+ *
+ * Brand text and blue-950 (only the deep-diving mixes' dark partner)
+ * follow the same logic.
  */
 const OMP_TOKEN_OVERRIDES: ThemeTokenOverrides = {
   '--dsw-alias-brand-primary': { light: '#febc38', dark: '#febc38' },
   '--dsw-alias-brand-primary-invert': { light: '#221a04', dark: '#221a04' },
   '--dsw-alias-brand-text': { light: '#a66e00', dark: '#febc38' },
+  '--dsw-alias-brand-primary-new-colorprimary-new-color': { light: '#dd9a0c', dark: '#febc38' },
+  '--dsw-alias-bg-document-selection': {
+    light: 'color-mix(in srgb, #febc38 45%, transparent)',
+    dark: 'color-mix(in srgb, #febc38 45%, transparent)',
+  },
+  '--dsw-static-deepseek-50': { light: '#fdf6e0', dark: '#fdf6e0' },
+  '--dsw-static-deepseek-100': { light: '#fbeec3', dark: '#fbeec3' },
+  '--dsw-static-deepseek-200': { light: '#f7df9a', dark: '#f7df9a' },
+  '--dsw-static-deepseek-300': { light: '#f0c75e', dark: '#f3cd68' },
+  '--dsw-static-deepseek-400': { light: '#e3aa22', dark: '#fec44a' },
+  '--dsw-static-deepseek-450': { light: '#cf8f06', dark: '#febc38' },
+  '--dsw-static-deepseek-500': { light: '#a66e00', dark: '#febc38' },
+  '--dsw-static-deepseek-600': { light: '#8a5f04', dark: '#d99e06' },
+  '--dsw-static-deepseek-700-delete': { light: '#6e4c05', dark: '#a87408' },
+  '--dsw-static-deepseek-800': { light: '#4d3f1c', dark: '#4d3f1c' },
+  '--dsw-static-deepseek-900': { light: '#382e13', dark: '#382e13' },
+  '--dsw-static-blue-950': { light: '#2a2008', dark: '#2a2008' },
 }
 
 /**
