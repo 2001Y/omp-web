@@ -5,9 +5,10 @@
  * stays the single source of truth; this plugin hardcodes nothing but the
  * slots it registers into).
  */
-import type { ClientContext, EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createElement } from 'react'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { sectionFor, loadCatalog } from './OmpTabSection.tsx'
 import { ModelRolesSection } from './ModelRolesSection.tsx'
 import { ConnectSection } from './ConnectSection.tsx'

@@ -13,11 +13,11 @@
  * opts it into the full-height view area).
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   Button,
   IconBranchOutline16,
-  IconChevronDownOutline14,
+  IconChevronDownOutlineRegular,
   Input,
   Menu,
   Pill,
@@ -695,7 +695,7 @@ export function HistoryView({ sessionId, t, inputActions, actions, refreshSessio
                 onClick={() => { setFilterOpen(state => !state) }}
               >
                 {t(filterLabelKey)}
-                <IconChevronDownOutline14 className={css.chevron} />
+                <IconChevronDownOutlineRegular className={css.chevron} />
               </button>
             )}
           />

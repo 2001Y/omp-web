@@ -6,7 +6,7 @@
  * search, collapsible groups, and a tab-level reset-all.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Button, DisclosureRow, IconChevronDownOutline14, IconRefreshOutline14, Input, Menu, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, DisclosureRow, IconChevronDownOutlineRegular, IconRefreshOutlineRegular, Input, Menu, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './settings.module.css'
 
 /** The ompSettings catalog wire shape (mirrors @oh-my-pi/web's protocol file). */
@@ -148,7 +148,7 @@ function FieldRow({ field, onWrite }: {
                 onClick={() => { setOpen(state => !state) }}
               >
                 {field.type === 'boolean' ? (value === true ? 'On' : 'Off') : optionLabel(menuOptions, value)}
-                <IconChevronDownOutline14 className={css.chevron} />
+                <IconChevronDownOutlineRegular className={css.chevron} />
               </button>
             )}
           />
@@ -179,7 +179,7 @@ function FieldRow({ field, onWrite }: {
             aria-label={`Restore ${field.label} to default`}
             onClick={() => { void write(field.default) }}
           >
-            <IconRefreshOutline14 />
+            <IconRefreshOutlineRegular />
           </button>
         ) : null}
       </div>
@@ -287,7 +287,7 @@ export function OmpTabSection({ tab }: { tab: string }) {
             onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setQuery(event.target.value) }}
           />
           {modifiedFields.length > 0 ? (
-            <Button variant="outline" size="sm" icon={<IconRefreshOutline14 />} onClick={() => { void resetAll() }}>
+            <Button variant="outline" size="sm" icon={<IconRefreshOutlineRegular />} onClick={() => { void resetAll() }}>
               Reset {modifiedFields.length} to default{modifiedFields.length > 1 ? 's' : ''}
             </Button>
           ) : null}

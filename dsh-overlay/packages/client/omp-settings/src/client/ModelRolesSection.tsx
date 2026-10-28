@@ -5,7 +5,7 @@
  * columns (context, max output, per-M cost, capability badges).
  */
 import { useEffect, useMemo, useState } from 'react'
-import { IconChevronDownOutline14, Input, Menu, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineRegular, Input, Menu, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { loadCatalog, ompApi } from './OmpTabSection.tsx'
 import css from './settings.module.css'
 
@@ -168,7 +168,7 @@ function ThinkingMenu({ value, disabled, onSelect }: {
           onClick={() => { setOpen(state => !state) }}
         >
           {value === undefined || value === '' ? 'thinking' : value}
-          <IconChevronDownOutline14 className={css.chevron} />
+          <IconChevronDownOutlineRegular className={css.chevron} />
         </button>
       )}
     />

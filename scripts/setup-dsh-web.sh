@@ -42,6 +42,11 @@ if [ -n "$(git -C "$TARGET" status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 
+# A previous run's overlay copy is a workspace package the pristine lockfile
+# does not know; remove it so the frozen install always sees the clean tree.
+# The overlay step below re-copies it fresh.
+rm -rf "$TARGET/packages/client/omp-settings"
+
 echo "==> pnpm install (frozen lockfile)"
 pnpm --dir "$TARGET" install --frozen-lockfile
 
