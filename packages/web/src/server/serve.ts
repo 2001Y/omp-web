@@ -78,7 +78,13 @@ async function prepareBootAssets(
 	}
 	const boot = await composeBootGraph(dshRoot, roster);
 	const rawIndex = await distIndexFile.text();
-	return { boot, indexHtml: renderIndexInjections(rawIndex, bootInjections(boot.graph)) };
+	// Host composition rebrands the page title; the vendored tree's own
+	// title ("DSH Local Build" / the official product name) never ships.
+	const indexHtml = renderIndexInjections(rawIndex, bootInjections(boot.graph)).replace(
+		/<title>[^<]*<\/title>/,
+		"<title>OMP Harness</title>",
+	);
+	return { boot, indexHtml };
 }
 
 /**
@@ -171,6 +177,25 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			// The ui-open-in-app probe: desktop applications this host could
 			// open paths in. A headless host has none to offer.
 			return Response.json({ apps: [] });
+		}
+		if (rawPathname === "/favicon.svg" || rawPathname === "/favicon-dark.svg") {
+			// Host-served brand assets: the π mark replaces the tree's fish
+			// favicon (same monochrome treatment: #000 light / #fff dark).
+			const asset = rawPathname === "/favicon.svg" ? "omp-favicon.svg" : "omp-favicon-dark.svg";
+			return new Response(Bun.file(path.join(import.meta.dir, "assets", asset)), {
+				headers: { "content-type": "image/svg+xml", "cache-control": "no-cache" },
+			});
+		}
+		if (rawPathname === "/manifest.webmanifest") {
+			// The install metadata names the product, so it is rebranded at
+			// serve time like the title; every other field passes through.
+			const manifest = (await Bun.file(path.join(distRoot, "manifest.webmanifest")).json()) as Record<
+				string,
+				unknown
+			>;
+			manifest.name = "OMP Harness";
+			manifest.short_name = "OMP";
+			return Response.json(manifest);
 		}
 		return serveStatic(decodeURIComponent(rawPathname), req.method, distRoot, distIndex, async () => indexHtml);
 	}

@@ -246,3 +246,29 @@ TUI-only 设置项标注按用户指示不做；DSH 品牌位（DSH Local Build 
   （release 解包布局，.gitignore 已挡）→ 仓旁 `../dsh-web`（工作区布局）。
 - **已知警告**：上游历史自带 `.turbo/cache/*.tar.zst`（53.92 MB）触发 GitHub
   大文件警告；属上游历史包袱，改写历史换消除的代价不成比例，保留。
+
+## ブランド差し替え（2026-10-28、ユーザー指示で実施）
+
+M20 記録の「DSH 品牌位は原版維持、更名には A3 確認と明確な方向が必要」という
+残件に対する実施記録。方向はユーザーが 2026-10-28 に確定：「ロゴなども
+deepseek から omp に変更」「OMP HARNESS のように、DSH のロゴをパクった感じ」。
+
+- **スロット経由（overlay のみ、ツリー無改変）**：`@omp/client-settings` が
+  `sidebar.brand.mark` / `sidebar.brand.name` / `conversation.hero.brand.mark`
+  を占有（ui-brand-official と同じ inject＋generator 形式で原子的に登録）。
+  マークは幾何構成の π（Brand.tsx に構成数値を明記：24×18 ステージ、キャップ
+  バー＋脚＋ノックアウトの目。魚の目のモチーフを継承）。名前は OMP の
+  タイプセット＋HARNESS バッジ（公式ワードマークのバッジ文法を模倣、色は
+  `--dsw-alias-label-*` トークンのみ）。
+- **ホスト配信（packages/web の組成責務）**：ページタイトルを
+  `OMP Harness` に差し替え、`/favicon.svg`・`/favicon-dark.svg` は π マークの
+  専用アセット（`src/server/assets/`、魚アイコンと同じ #000/#fff の単色処理）、
+  `/manifest.webmanifest` は name/short_name のみ差し替えて配信。いずれも
+  vendored ツリーには触れない。
+- **残留（意図的）**：ヒーローの見出し文言 `Into the Unknown` は
+  ui-conversation のロケール文字列で差し込み口がなく、原版のまま。変えるなら
+  setup 時のロケールパッチという別途 A3 判断が要る。
+- **タイトルの二重経路**：配信 HTML の `<title>` 差し替え（ホスト組成）に加え、
+  実行時の document.title はツリー自身のビルド変数 `DSH_CLIENT_TITLE` が
+  正本（vite の clientDocumentTitle / clientBuildEnvironmentDefines）。
+  setup スクリプトが `OMP Harness` を渡す（`OMP_WEB_TITLE` で上書き可）。

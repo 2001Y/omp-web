@@ -1,9 +1,9 @@
 /**
  * omp web settings sections: one settings.section per OMP settings tab, plus
- * the session History view tab. Fully catalog-driven — the tab list, labels,
- * and order come from the ompSettings/describe projection (the omp schema
- * stays the single source of truth; this plugin hardcodes nothing but the
- * slots it registers into).
+ * the session History view tab and the OMP Harness brand occupants. Fully
+ * catalog-driven — the tab list, labels, and order come from the
+ * ompSettings/describe projection (the omp schema stays the single source
+ * of truth; this plugin hardcodes nothing but the slots it registers into).
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
@@ -13,8 +13,10 @@ import { sectionFor, loadCatalog } from './OmpTabSection.tsx'
 import { ModelRolesSection } from './ModelRolesSection.tsx'
 import { ConnectSection } from './ConnectSection.tsx'
 import { HistoryView } from './HistoryView.tsx'
+import { OmpBrandMark, OmpBrandName } from './Brand.tsx'
 import { NS, en, zh } from './locales.ts'
 import './settings-dialog.css'
+import './brand.css'
 
 // Type-only: pull the cross-plugin module merges into this program (the
 // ctx.locale Context merge, the settings.section and conversation.view slot
@@ -23,6 +25,8 @@ import './settings-dialog.css'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 // 'conversation' (provided by ui-conversation) gates this plugin's apply on
 // ui-conversation's activation — the chat view entry with its store handle
@@ -36,6 +40,17 @@ export const inject = ['slots', 'locale', 'sessions', 'conversation']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  // Brand occupants: the sidebar mark/name and the conversation hero mark
+  // carry the OMP Harness lockup (Brand.tsx) instead of the tree's fish
+  // fallbacks. The generator form installs the three registrations
+  // atomically, mirroring ui-brand-official's declaration-aware pattern.
+  ctx.slots.inject('sidebar.brand.mark', () =>
+    ctx.slots.inject('sidebar.brand.name', () =>
+      ctx.slots.inject('conversation.hero.brand.mark', function* () {
+        yield ctx.slots.register({ name: 'sidebar.brand.mark' }, OmpBrandMark)
+        yield ctx.slots.register({ name: 'sidebar.brand.name' }, OmpBrandName)
+        yield ctx.slots.register({ name: 'conversation.hero.brand.mark' }, OmpBrandMark)
+      })))
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'omp-settings: history dictionaries')
   // Registration-time text (the view tab label) reads through the bound
   // translate as a thunk so it follows the active locale without

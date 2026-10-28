@@ -1,0 +1,28 @@
+/* OMP Harness wordmark lockup (Brand.tsx). Colors come only from --dsw-*
+   alias tokens, mirroring the official wordmark badge: label-primary
+   letters, and inverted letters on a label-primary badge. Sizes are the
+   brand spec for this lockup, not layout values. */
+.omp-brand-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.omp-brand-name-text {
+  color: var(--dsw-alias-label-primary);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.omp-brand-name-badge {
+  color: var(--dsw-alias-label-primary-inverted);
+  background: var(--dsw-alias-label-primary);
+  border-radius: 3px;
+  padding: 2.5px 4px 2px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
