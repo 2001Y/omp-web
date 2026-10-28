@@ -272,3 +272,20 @@ deepseek から omp に変更」「OMP HARNESS のように、DSH のロゴを�
   実行時の document.title はツリー自身のビルド変数 `DSH_CLIENT_TITLE` が
   正本（vite の clientDocumentTitle / clientBuildEnvironmentDefines）。
   setup スクリプトが `OMP Harness` を渡す（`OMP_WEB_TITLE` で上書き可）。
+
+### ブランドの独立プラグイン化と色レイヤー（2026-10-28、同日追記）
+
+ユーザー指示（「全部プラグインにしておくのがいい。デフォルトで omp に」
+「色も同様」）を受け、ブランドを `@omp/client-settings` から独立した
+`@omp/client-brand` へ分離した（本家の ui-brand-official と同じ役割分担）。
+ホストのロスターは brand→settings の順で両 overlay を既定で追加する
+（roster.ts の OVERLAY_PACKAGES）。外せば素の DSH ブランドに戻る、という
+意味でこれが本フォークの「プロファイル」単位になる。
+
+色はコンポーネント側に直書きせず、ui-theme の `ctx.theme.overrideTokens`
+（トークン上書きレイヤー）で `--dsw-alias-brand-primary` 等に OMP の
+TUI アクセント #febc38 を重ねる。プラグインを外せばレイヤーごと消える。
+ライト側の brand-text だけ同系の濃い金 #a66e00（#febc38 は白地で読めない
+ための調整）。タイトルは従来どおりビルド変数（プロファイル的設定）で、
+ロゴだけが本質的にコンポーネント＝プラグインを要する、という切り分け。
+favicon は本家と同じ単色（#000/#fff）扱いのまま（ブランド色は画面内のみ）。

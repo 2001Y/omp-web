@@ -74,6 +74,7 @@ describe("deriveBootRoster", () => {
 		expect(roster).toContain("@deepseek-ai/dsh-client-connection");
 		expect(roster).toContain("@deepseek-ai/dsh-client-ui-session");
 		expect(roster.at(-1)).toBe("@omp/client-settings");
+		expect(roster.at(-2)).toBe("@omp/client-brand");
 		// Host exclusions and profile-disabled rows are absent.
 		expect(roster).not.toContain("@deepseek-ai/dsh-client-hmr");
 		expect(roster).not.toContain("@deepseek-ai/dsh-client-ui-message-feedback");

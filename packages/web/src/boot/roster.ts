@@ -43,8 +43,8 @@ export const BOOT_ROSTER_EXCLUSIONS: ReadonlyArray<{ name: string; reason: strin
 	},
 ];
 
-/** The fork's own overlay package, appended to every derived roster. */
-export const OVERLAY_PACKAGE = "@omp/client-settings";
+/** The fork's own overlay packages, appended to every derived roster (brand first, settings last). */
+export const OVERLAY_PACKAGES: readonly string[] = ["@omp/client-brand", "@omp/client-settings"];
 
 /** Bundle packages whose patch layers compose the web profile, in layer order. */
 const BUNDLE_DIRS = ["packages/bundle/base", "packages/bundle/web-app"] as const;
@@ -189,6 +189,6 @@ export async function deriveBootRoster(dshRoot: string, profileName = "web"): Pr
 		seen.add(row.name);
 		roster.push(row.name);
 	}
-	roster.push(OVERLAY_PACKAGE);
+	roster.push(...OVERLAY_PACKAGES);
 	return roster;
 }

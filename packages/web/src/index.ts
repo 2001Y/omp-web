@@ -9,7 +9,7 @@
 
 export type { BootPluginRecord, ComposedBoot, WebBootBatch, WebBootEntry, WebBootGraph } from "./boot/graph";
 export type { PatchRow } from "./boot/roster";
-export { BOOT_ROSTER_EXCLUSIONS, deriveBootRoster, OVERLAY_PACKAGE, parsePatchRows } from "./boot/roster";
+export { BOOT_ROSTER_EXCLUSIONS, deriveBootRoster, OVERLAY_PACKAGES, parsePatchRows } from "./boot/roster";
 export {
 	BOOT_ROSTER,
 	BOOTSTRAP_PACKAGE_ID,

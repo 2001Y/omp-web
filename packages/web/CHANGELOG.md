@@ -10,7 +10,7 @@
 ### Added (dsh 0.2.x port)
 
 - `scripts/setup-dsh-web.sh` prepares a stock dsh tree for web mode without modifying it (the overlay directory is the only addition), with `OMP_WEB_DSH_BUILD=lib-web` for small machines.
-- Web mode presents the OMP Harness brand: the overlay fills the sidebar and conversation-hero brand slots with a geometric π mark and an OMP + HARNESS badge lockup, and the host serves the matching page title, favicons, and app-manifest name — the vendored tree stays unmodified.
+- Web mode presents the OMP Harness brand: the standalone `@omp/client-brand` overlay plugin fills the sidebar and conversation-hero brand slots with a geometric π mark and an OMP + HARNESS badge lockup and layers OMP's gold (`#febc38`) over the theme's brand tokens, and the host serves the matching page title, favicons, and app-manifest name — the vendored tree stays unmodified.
 
 ### Fixed (omp-web M18)
 

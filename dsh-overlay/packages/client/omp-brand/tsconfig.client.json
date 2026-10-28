@@ -1,0 +1,1 @@
+{"compilerOptions": {"outDir": "lib/types", "rootDir": "src", "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"}, "extends": "../../../tsconfig.base.client.json", "include": ["src"], "references": [{"path": "../../../vendor/cordis"}, {"path": "../ui-slots"}, {"path": "../ui-conversation"}, {"path": "../ui-renderer"}, {"path": "../ui-sidebar"}, {"path": "../ui-theme"}]}

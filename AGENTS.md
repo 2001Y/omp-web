@@ -356,8 +356,9 @@ DeepSeek Harness (dsh) web client stack. Hard constraints for any work on it:
   subagents, queues, plan mode.
 - **A2 — no self-made UI components.** Every visual/interactive component
   comes from the dsh-web client packages. The vendored dsh tree takes zero
-  file modifications; fork presentation lives only in the
-  `@omp/client-settings` overlay plugin (`dsh-overlay/`).
+  file modifications; fork presentation lives only in the overlay plugins
+  under `dsh-overlay/` (`@omp/client-settings` for settings/history,
+  `@omp/client-brand` for the brand occupants and the theme color layer).
 - **A3 — exceptions need explicit user approval first**, recorded in
   `docs/web/PROVENANCE.md`; components must consume `--dsw-*` tokens only.
 - **A4 — glue vs. components.** Self-authored code is non-presentation only:

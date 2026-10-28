@@ -3,7 +3,8 @@
  * pastiche of the official DeepSeek Harness lockup (mark + wordmark +
  * HARNESS badge) rebuilt for OMP, under the fork's overlay rule: the
  * vendored tree stays unmodified and colors come only from `--dsw-*`
- * tokens / currentColor.
+ * tokens (the OMP gold itself arrives as a theme-token layer, see
+ * index.ts) — the mark paints in `--dsw-alias-brand-primary`.
  *
  * The mark is constructed geometrically on the fish mark's stage
  * (viewBox 0 0 24 18): a filled π — Oh My Pi's initial glyph — drawn from
@@ -45,7 +46,7 @@ export function OmpBrandMark({ size = 24, className }: OmpBrandMarkProps) {
     <svg
       width={size}
       height={(size * OMP_MARK_VIEWBOX.height) / OMP_MARK_VIEWBOX.width}
-      className={className}
+      className={className === undefined ? 'omp-brand-mark' : `omp-brand-mark ${className}`}
       viewBox={`0 0 ${OMP_MARK_VIEWBOX.width} ${OMP_MARK_VIEWBOX.height}`}
       fill="none"
       aria-hidden="true"

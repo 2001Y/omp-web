@@ -72,7 +72,8 @@ export const BOOT_ROSTER: readonly string[] = [
 	// dual-face base rows active in every profile
 	"@deepseek-ai/dsh-typert-registry",
 	"@deepseek-ai/dsh-api-gateway",
-	// the omp fork's own sections (settings tabs over the ompSettings RPCs)
+	// the omp fork's own plugins (brand occupants + settings tabs over the ompSettings RPCs)
+	"@omp/client-brand",
 	"@omp/client-settings",
 ];
 
