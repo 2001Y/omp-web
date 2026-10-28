@@ -89,6 +89,14 @@ export function parsePatchRows(text: string, profileName: string): PatchRow[] {
 	let current: { id: string; name?: string; disabledRaw?: string } | undefined;
 	const flush = (): void => {
 		if (current === undefined) return;
+		// Structural rows (e.g. `name: cordis:group` with nested config
+		// children) are not packages: npm names never contain ":". Their
+		// nested rows are parsed as rows of their own, so dropping the
+		// group row loses nothing.
+		if (current.name !== undefined && current.name.includes(":")) {
+			current = undefined;
+			return;
+		}
 		if (current.name !== undefined || current.disabledRaw !== undefined) {
 			const evaluated =
 				current.disabledRaw === undefined ? undefined : evaluateDisabled(current.disabledRaw, profileName);

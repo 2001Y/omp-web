@@ -305,11 +305,14 @@ function graphRow(id: string, rev: string, decl: DshClientDeclaration): WebBootE
  */
 async function indexPackages(dshRoot: string): Promise<Map<string, string>> {
 	const index = new Map<string, string>();
-	const glob = new Bun.Glob("packages/*/*/package.json");
-	for await (const rel of glob.scan({ cwd: dshRoot })) {
-		const manifest = (await Bun.file(path.join(dshRoot, rel)).json()) as { name?: unknown };
-		if (typeof manifest.name !== "string") continue;
-		index.set(manifest.name, path.join(dshRoot, path.dirname(rel)));
+	// Workspace packages live under packages/<group>/<pkg>; vendored cordis
+	// plugins live under vendor/<pkg> and appear in the bundle patches too.
+	for (const pattern of ["packages/*/*/package.json", "vendor/*/package.json"]) {
+		for await (const rel of new Bun.Glob(pattern).scan({ cwd: dshRoot })) {
+			const manifest = (await Bun.file(path.join(dshRoot, rel)).json()) as { name?: unknown };
+			if (typeof manifest.name !== "string") continue;
+			index.set(manifest.name, path.join(dshRoot, path.dirname(rel)));
+		}
 	}
 	return index;
 }
@@ -334,6 +337,12 @@ export async function composeBootGraph(
 	for (const id of roster) {
 		const pkgDir = packages.get(id);
 		if (pkgDir === undefined) {
+			// Patch rows may name a module inside a package
+			// ("<pkg>/<subpath>"): host-side plugin entries, not browser
+			// bundles. Skip those. A name whose package part is absent too
+			// is a genuine roster/tree mismatch.
+			const hasPackagePrefix = [...packages.keys()].some(name => id.startsWith(`${name}/`));
+			if (hasPackagePrefix) continue;
 			throw new Error(`web boot: roster package ${id} not found under ${dshRoot}/packages`);
 		}
 		const manifest = (await Bun.file(path.join(pkgDir, "package.json")).json()) as {
@@ -341,7 +350,15 @@ export async function composeBootGraph(
 			exports?: unknown;
 		};
 		const decl = parseDshClient(id, manifest.dsh?.client);
-		if (decl === undefined || decl.platform !== "web") {
+		if (decl === undefined) {
+			// The bundle patches list host and client packages together; a
+			// package with no dsh.client declaration at all is not a browser
+			// plugin and simply has no boot entry. A declaration that exists
+			// but is malformed or non-web is a real inconsistency — keep
+			// failing on that below via parseDshClient's own errors.
+			continue;
+		}
+		if (decl.platform !== "web") {
 			throw new Error(`web boot: roster package ${id} declares no web dsh.client half`);
 		}
 		const clientRel = clientExportOf(id, manifest.exports);
