@@ -1,0 +1,121 @@
+name: follow-upstream
+
+# Track the two upstreams this fork follows (see DESIGN: dsh-baseline.json is
+# the single source of truth for the dsh track). Drift opens or updates one
+# tracking issue; a dsh bump additionally gets a mechanical attempt branch:
+# baseline update + setup + contract tests, opened as a PR when green.
+# Nothing auto-merges. OMP rebases stay manual (conflicts need judgment),
+# so that track is detection-only.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: "dsh version to attempt (default: npm latest)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.drift.outputs.drift }}
+      dsh_latest: ${{ steps.drift.outputs.dsh_latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - name: Fetch upstream omp
+        run: git fetch https://github.com/can1357/oh-my-pi.git main:refs/remotes/upstream/main
+      - name: Check drift
+        id: drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          bash scripts/check-upstream.sh | tee drift-report.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" = "3" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "0" ]; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            exit "$code"
+          fi
+          latest="$(npm view @deepseek-ai/dsh dist-tags --json | bun -e 'const t = await Bun.stdin.json(); console.log(t.latest ?? "")')"
+          echo "dsh_latest=${{ inputs.dsh_version || '' }}" >> "$GITHUB_OUTPUT"
+          if [ -z "${{ inputs.dsh_version }}" ]; then
+            echo "dsh_latest=$latest" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open or update the tracking issue
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="upstream drift detected"
+          existing="$(gh issue list --search "$title in:title" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file drift-report.txt
+          else
+            gh issue create --title "$title" --body-file drift-report.txt --label upstream-follow
+          fi
+
+  attempt-dsh-bump:
+    needs: check
+    if: needs.check.outputs.drift == 'true' && needs.check.outputs.dsh_latest != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+      - name: Resolve the target commit for the new dsh tag
+        id: target
+        run: |
+          version="${{ needs.check.outputs.dsh_latest }}"
+          git ls-remote https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/dsh-v${version}" | cut -f1 > target-commit.txt
+          test -s target-commit.txt
+          echo "commit=$(cat target-commit.txt)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Update the baseline
+        run: |
+          bun -e '
+            const path = "dsh-baseline.json";
+            const baseline = await Bun.file(path).json();
+            baseline.version = process.argv[1];
+            baseline.commit = process.argv[2];
+            baseline.decidedAt = new Date().toISOString().slice(0, 10);
+            await Bun.write(path, JSON.stringify(baseline, null, 2) + "\n");
+          ' "${{ steps.target.outputs.version }}" "${{ steps.target.outputs.commit }}"
+      - name: Verify against the new tree (contract gate)
+        run: |
+          bash scripts/setup-dsh-web.sh "$RUNNER_TEMP/dsh-tree"
+          bun install --frozen-lockfile
+          bun test packages/web
+          (cd packages/web && bun run check:types)
+      - name: Open the bump PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="follow/dsh-${{ steps.target.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add dsh-baseline.json
+          git commit -m "chore(web): bump dsh baseline to ${{ steps.target.outputs.version }}"
+          git push origin "$branch"
+          gh pr create --title "chore(web): bump dsh baseline to ${{ steps.target.outputs.version }}" \
+            --body "Mechanical baseline bump. setup-dsh-web.sh, packages/web tests and type check passed against the new tree in CI. Review the upstream release notes before merging; a green gate means the boot/roster/dispatcher contracts held, not that every client feature was exercised." \
+            --label upstream-follow

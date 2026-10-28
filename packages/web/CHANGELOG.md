@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed (dsh 0.2.x port)
+
+- Web mode now serves the DeepSeek Harness 0.2.x client stack (baseline 0.2.1-rc.2, tracked in `dsh-baseline.json`): the boot graph carries `batches` and combo plugin URLs, authentication is the launch-token → signed-cookie flow with a persisted secret, and the wire surface is the Typert Remote one (single bidirectional `/api/remote.mux`, two-member envelopes, `gateway/*` error codes) instead of the 0.1.x ApiProxy dialect.
+- The boot roster is derived from the target tree's own bundle patches (`cordis.patch.yml` layers) instead of a hand-written list, and the `@omp/client-settings` overlay is ported to the 0.2.x client packages (the settings/history RPCs keep their names and shapes).
+
+### Added (dsh 0.2.x port)
+
+- `scripts/setup-dsh-web.sh` prepares a stock dsh tree for web mode without modifying it (the overlay directory is the only addition), with `OMP_WEB_DSH_BUILD=lib-web` for small machines.
+
 ### Fixed (omp-web M18)
 
 - A parked approval/question ask no longer deadlocks abort: the driver stream carries `cancel-asks` before every turn-unwinding path (cancel / rewind / session switch), the server's `PendingInteractions.failSession` settles each parked gate promise, and the client panel drops via the `approval/resolved{rejected}` / `question/resolved{cancelled}` counterpart frames.
