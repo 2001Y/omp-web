@@ -13,6 +13,20 @@
   <img src="docs/web/screenshots/history.webp" alt="omp-web history tree" width="48%">
 </p>
 
+## About this fork
+
+This repository is a fork of [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)
+(MIT, © Mario Zechner); the web mode is this fork's own layer on top of the
+upstream base (see `docs/web/PROVENANCE.md` for exactly what is ours).
+
+The DeepSeek Harness web client is **not vendored into this repository and is
+never modified**. The setup script clones
+[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
+at the commit pinned in `dsh-baseline.json`, and the UI is composed only
+through DSH's own extension seams — the overlay packages under `dsh-overlay/`
+(brand slots, theme tokens, settings). DSH is MIT-licensed (© DeepSeek) and
+is fetched at build time; this repository redistributes no DSH code.
+
 ## Install & run
 
 Prerequisites: [Bun](https://bun.sh) ≥ 1.4 and a Rust toolchain (the agent's
@@ -21,7 +35,7 @@ Node ≥ 22.19 and pnpm 11.7 are only needed if you build the dsh runtime from
 source (option B).
 
 ```sh
-git clone https://github.com/LaneSun/omp-web.git
+git clone https://github.com/2001Y/omp-web.git
 cd omp-web
 bun setup        # installs workspaces + builds the pi-natives addon
 ```
@@ -30,8 +44,8 @@ The browser stack is served from a **dsh-web runtime tree** (MIT-licensed,
 pinned baseline). Pick one:
 
 **A. Prebuilt runtime (recommended)** — download `dsh-web-runtime-*.tar.gz`
-from the [latest release](https://github.com/LaneSun/omp-web/releases) and
-extract it as `dsh-web/` inside this repo (auto-detected):
+from the original project's [latest release](https://github.com/LaneSun/omp-web/releases)
+(LaneSun/omp-web) and extract it as `dsh-web/` inside this repo (auto-detected):
 
 ```sh
 mkdir -p dsh-web
@@ -39,7 +53,7 @@ curl -fsSL https://github.com/LaneSun/omp-web/releases/download/v0.1.0/dsh-web-r
 ```
 
 **B. Source build** — clone deepseek-harness at the pinned baseline, overlay
-the fork's `@omp/client-settings` plugin, and build everything:
+the fork's `@omp/*` client plugins (`dsh-overlay/`), and build everything:
 
 ```sh
 scripts/setup-dsh-web.sh            # clones + builds into ./dsh-web
