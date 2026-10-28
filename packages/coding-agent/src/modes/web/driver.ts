@@ -1167,13 +1167,12 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		const providers = getOAuthProviders();
 		const info = providers.find(entry => entry.id === provider && entry.available);
 		if (info === undefined) throw new Error(`omp-web: unknown OAuth provider "${provider}"`);
-		// A remote browser cannot receive a loopback callback, so a dedicated
-		// device-code variant, when one is registered, is the web-viable flow
-		// (its credentials land under the base provider id).
-		const device = provider.endsWith("-device")
-			? undefined
-			: providers.find(entry => entry.id === `${provider}-device` && entry.available);
-		const loginId = device?.id ?? provider;
+		// The provider's own flow runs as-is: a remote browser cannot receive
+		// the loopback callback, so the flow's manual-input race carries it —
+		// the panel prompts for the final redirect URL (or bare code) and the
+		// submit answers it. Dedicated device-code variants stay available as
+		// their own Connect entries for anyone who prefers that grant.
+		const loginId = provider;
 		const storesAs = getOAuthCredentialProvider(loginId);
 		for (const attempt of this.#authLoginAttempts.values()) {
 			if (attempt.provider !== storesAs) continue;
