@@ -12,10 +12,9 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { WebHistoryNode } from "@oh-my-pi/web";
 import type { SessionEntry } from "../../session/session-entries";
-import { toPathList } from "../../tools/path-utils";
-import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
+import { shortenPath, toPathList } from "@oh-my-pi/pi-tui/render/render-utils";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
-import { resolveAssistantErrorPresentation } from "../utils/transcript-render-helpers";
+import { resolveAssistantErrorPresentation } from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
 
 /** The text budget the TUI applies to tree-row content. */
 const MAX_TEXT = 200;
