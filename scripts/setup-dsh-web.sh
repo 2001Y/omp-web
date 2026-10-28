@@ -45,8 +45,13 @@ fi
 echo "==> pnpm install (frozen lockfile)"
 pnpm --dir "$TARGET" install --frozen-lockfile
 
-echo "==> pnpm build (build:lib + build:web)"
-pnpm --dir "$TARGET" build
+echo "==> pnpm build (default: full build; OMP_WEB_DSH_BUILD=lib-web skips the aggregate check gates for small machines)"
+if [ "${OMP_WEB_DSH_BUILD:-}" = "lib-web" ]; then
+  pnpm --dir "$TARGET" run build:lib
+  pnpm --dir "$TARGET" run build:web
+else
+  pnpm --dir "$TARGET" build
+fi
 
 echo "==> overlaying @omp/client-settings"
 rm -rf "$TARGET/$PLUGIN_REL"
