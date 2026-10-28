@@ -54,7 +54,7 @@ export async function ompApi<T>(method: string, payload: Record<string, unknown>
   const response = await fetch(`/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'client-request', rpcId: `omp-settings-${rpcSeq++}`, payload }),
+    body: JSON.stringify({ type: 'client-request', rpcId: `omp-settings-${rpcSeq++}`, method, payload: { args: payload } }),
   })
   const envelope = (await response.json()) as { result: { ok: boolean; value?: T; error?: { message?: string } } }
   if (!envelope.result.ok) {

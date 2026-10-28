@@ -167,6 +167,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		if (rawPathname.startsWith("/plugins/")) {
 			return handlePluginBundle(req, requestUrl);
 		}
+		if (rawPathname === "/open-in-app/apps") {
+			// The ui-open-in-app probe: desktop applications this host could
+			// open paths in. A headless host has none to offer.
+			return Response.json({ apps: [] });
+		}
 		return serveStatic(decodeURIComponent(rawPathname), req.method, distRoot, distIndex, async () => indexHtml);
 	}
 

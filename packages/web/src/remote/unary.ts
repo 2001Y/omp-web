@@ -25,6 +25,9 @@ import {
 /** Namespaces the 0.2.x gateway would claim for this host's surface. */
 const KNOWN_NAMESPACES = new Set([
 	"$events",
+	"ompSettings",
+	"ompHistory",
+	"dynamicCordisRunner",
 	"session",
 	"skills",
 	"fileReferences",
@@ -266,6 +269,104 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 }
 
 /**
+ * The overlay's own namespaces (the @omp/client-settings plugin is the only
+ * caller). These are this host's private surface, not dsh contracts; the
+ * shapes are the ones the overlay has always used.
+ */
+async function dispatchOmpSettings(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
+	switch (method) {
+		case "describe":
+			return ok(await driver.ompSettingsCatalog());
+		case "update": {
+			const key = stringArg(args, "key");
+			if (key === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/update requires a key");
+			}
+			await driver.setOmpSetting(key, args.value);
+			return ok(undefined);
+		}
+		case "setModelRole": {
+			const role = stringArg(args, "role");
+			if (role === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/setModelRole requires a role");
+			}
+			const model = stringArg(args, "model");
+			const thinking = stringArg(args, "thinking");
+			await driver.setModelRole(role, model === undefined ? undefined : { model, ...(thinking !== undefined ? { thinking } : {}) });
+			return ok(undefined);
+		}
+		case "logoutProvider": {
+			const provider = stringArg(args, "provider");
+			if (provider === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompSettings/logoutProvider requires a provider");
+			}
+			await driver.logoutProvider(provider);
+			return ok(undefined);
+		}
+		default:
+			return { ok: false, error: methodUnavailable(`ompSettings/${method}`) };
+	}
+}
+
+async function dispatchOmpHistory(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
+	const sessionId = stringArg(args, "sessionId");
+	if (sessionId === undefined) {
+		return fail("gateway/arguments-invalid", `omp-web: ompHistory/${method} requires sessionId`);
+	}
+	switch (method) {
+		case "tree":
+			return ok(await driver.historyTree(sessionId));
+		case "navigate": {
+			const entryId = stringArg(args, "entryId");
+			if (entryId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompHistory/navigate requires entryId");
+			}
+			return ok(
+				await driver.navigateToEntry(sessionId, entryId, {
+					...(typeof args.summarize === "boolean" ? { summarize: args.summarize } : {}),
+					...(typeof args.customInstructions === "string" ? { customInstructions: args.customInstructions } : {}),
+				}),
+			);
+		}
+		case "forkAt": {
+			const entryId = stringArg(args, "entryId");
+			if (entryId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompHistory/forkAt requires entryId");
+			}
+			return ok(await driver.fork(sessionId, { entryId }));
+		}
+		case "label": {
+			const entryId = stringArg(args, "entryId");
+			if (entryId === undefined) {
+				return fail("gateway/arguments-invalid", "omp-web: ompHistory/label requires entryId");
+			}
+			const label = typeof args.label === "string" && args.label !== "" ? args.label : undefined;
+			await driver.setEntryLabel(sessionId, entryId, label);
+			return ok(undefined);
+		}
+		default:
+			return { ok: false, error: methodUnavailable(`ompHistory/${method}`) };
+	}
+}
+
+/**
+ * The dynamic cordis runner surface. This host loads its plugin set
+ * statically at boot (the boot graph), so there is no dynamic inventory to
+ * report and inspect manifests are accepted with nothing to register —
+ * the same answers dsh's own client test defaults give.
+ */
+function dispatchDynamicCordisRunner(method: string): RpcResult<unknown> {
+	switch (method) {
+		case "inventory":
+			return ok([]);
+		case "syncInspectManifest":
+			return ok(null);
+		default:
+			return { ok: false, error: methodUnavailable(`dynamicCordisRunner/${method}`) };
+	}
+}
+
+/**
  * Create the unary dispatcher bound to one driver.
  * @returns a handler mapping (endpoint, parsed envelope) to an outcome.
  */
@@ -304,6 +405,9 @@ export function createRemoteDispatcher(driver: WebDriver): {
 			}
 			try {
 				if (namespace === "session") return respond(await dispatchSession(driver, method, payload.args));
+				if (namespace === "ompSettings") return respond(await dispatchOmpSettings(driver, method, payload.args));
+				if (namespace === "ompHistory") return respond(await dispatchOmpHistory(driver, method, payload.args));
+				if (namespace === "dynamicCordisRunner") return respond(dispatchDynamicCordisRunner(method));
 				return respond({ ok: false, error: serviceUnavailable(endpoint) });
 			} catch (error) {
 				return respond({
