@@ -13,9 +13,10 @@
 set -euo pipefail
 
 DSH_REPO="https://github.com/deepseek-ai/deepseek-harness.git"
-# Pinned baseline recorded in docs/web/PROVENANCE.md; bump only deliberately.
-DSH_COMMIT="b150a551b8d465e31e418e1b2eaf5e79bbb7d28e"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The baseline's single source of truth is <repo>/dsh-baseline.json; bump only there.
+DSH_COMMIT="$(bun -e 'const b = await Bun.file(process.argv[1]).json(); process.stdout.write(b.commit)' "$REPO_ROOT/dsh-baseline.json")"
+[ -n "$DSH_COMMIT" ] || { echo "error: could not read commit from dsh-baseline.json" >&2; exit 1; }
 TARGET="$(cd "${1:-$REPO_ROOT/dsh-web}" 2>/dev/null && pwd || echo "${1:-$REPO_ROOT/dsh-web}")"
 PLUGIN_REL="packages/client/omp-settings"
 
@@ -71,17 +72,11 @@ link_pkg() { # $1 = package name
 }
 
 echo "==> linking overlay workspace dependencies"
-for dep in \
-  @deepseek-ai/cordis \
-  @deepseek-ai/dsh-client-connection \
-  @deepseek-ai/dsh-client-locale \
-  @deepseek-ai/dsh-client-runtime \
-  @deepseek-ai/dsh-client-ui-conversation \
-  @deepseek-ai/dsh-client-ui-primitives \
-  @deepseek-ai/dsh-client-ui-settings \
-  @deepseek-ai/dsh-client-ui-slots; do
-  link_pkg "$dep"
-done
+# Derived from the overlay's own peerDependencies (react keeps its .pnpm
+# special case below); new overlay dependencies follow automatically.
+while IFS= read -r dep; do
+  [ -n "$dep" ] && link_pkg "$dep"
+done < <(bun -e 'const p = await Bun.file(process.argv[1]).json(); for (const name of Object.keys(p.peerDependencies ?? {})) { if (name !== "react") console.log(name) }' "$REPO_ROOT/dsh-overlay/$PLUGIN_REL/package.json")
 react_dir="$(ls -d "$TARGET"/node_modules/.pnpm/react@*/node_modules/react 2>/dev/null | head -1)"
 [ -n "$react_dir" ] || { echo "error: react not found in $TARGET/node_modules/.pnpm" >&2; exit 1; }
 ln -sfn "$(realpath --relative-to="$TARGET/$PLUGIN_REL/node_modules" "$react_dir")" \
@@ -101,8 +96,9 @@ TSDOWN="$TARGET/node_modules/.bin/tsdown"
 echo "==> verifying runtime tree"
 [ -f "$TARGET/apps/web/dist/index.html" ] || { echo "error: apps/web/dist/index.html missing" >&2; exit 1; }
 bundles="$(find "$TARGET"/packages/*/*/lib -maxdepth 1 -name client.js 2>/dev/null | wc -l)"
-echo "    found $bundles plugin bundles (browser roster needs 36)"
-[ "$bundles" -ge 36 ] || { echo "error: incomplete build" >&2; exit 1; }
+echo "    found $bundles plugin bundles (sanity floor: 30; the boot roster itself is derived from the tree's bundle patches at runtime)"
+[ "$bundles" -ge 30 ] || { echo "error: incomplete build" >&2; exit 1; }
+[ -f "$TARGET/packages/client/modules/lib/client.js" ] || { echo "error: bootstrap bundle (client-modules) missing" >&2; exit 1; }
 
 echo "==> done"
 if [ "$TARGET" = "$REPO_ROOT/dsh-web" ]; then
