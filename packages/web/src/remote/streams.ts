@@ -5,8 +5,10 @@
  * One WebSocket carries every host-initiated stream: `$events` (host event
  * emits plus the two answerable waterfalls, `approval/request` and
  * `user-questions/request`), `session/follow` (one session's journal),
- * `session/control` (host-wide projection baselines and updates), and
- * `workspace/follow` (the workspace list baseline). Driver notifications
+ * `session/control` (host-wide projection baselines and updates),
+ * `workspace/follow` (the workspace list baseline), and
+ * `remoteAccess/follow` (the caller's access baseline — always the owner
+ * baseline on this single-principal host). Driver notifications
  * fan out onto the open subscriptions; journal events are forwarded only
  * in gap-free seq order — a gap ends the follow with an error frame rather
  * than silently skipping, per the journal contract.
@@ -50,7 +52,11 @@ interface WorkspaceSub {
 	kind: "workspace";
 }
 
-type Sub = FollowSub | EventsSub | ControlSub | WorkspaceSub;
+interface AccessSub {
+	kind: "access";
+}
+
+type Sub = FollowSub | EventsSub | ControlSub | WorkspaceSub | AccessSub;
 
 interface SocketState {
 	clientId: string;
@@ -71,7 +77,7 @@ interface PendingAsk {
 const UPLINK_LIMIT_BYTES = 256 * 1024;
 
 /** Endpoints this mux implements; anything else answers service-unavailable on open. */
-const STREAM_ENDPOINTS = new Set(["$events", "session/follow", "session/control", "workspace/follow"]);
+const STREAM_ENDPOINTS = new Set(["$events", "session/follow", "session/control", "workspace/follow", "remoteAccess/follow"]);
 
 /** The stream mux: socket registry, subscription engine, and driver fan-out. */
 export class RemoteStreams {
@@ -333,6 +339,13 @@ export class RemoteStreams {
 					}
 				}
 				this.#sendItem(socket, streamId, { type: "baseline", value: { projections } });
+				return;
+			}
+			if (endpoint === "remoteAccess/follow") {
+				state.subs.set(streamId, { kind: "access" });
+				// This host's only principal is the owner: the opening frame is
+				// the owner baseline, and grants never change afterwards.
+				this.#sendItem(socket, streamId, { type: "baseline", owner: true });
 				return;
 			}
 			if (endpoint === "workspace/follow") {

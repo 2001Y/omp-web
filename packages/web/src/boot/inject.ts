@@ -103,7 +103,7 @@ export function renderIndexInjections(html: string, rows: readonly IndexInjectio
  * deferred the client entry awaits.
  * @param graph - the composed entry graph.
  * @returns rows in protocol order: queue script, application preloads,
- * bootstrap script, graph global, boot-ready resolution.
+ * bootstrap script, graph global, remote-access baseline, boot-ready resolution.
  */
 export function bootInjections(graph: WebBootGraph): IndexInjection[] {
 	const bootstrapId = JSON.stringify(CLIENT_MODULES_ID);
@@ -140,6 +140,12 @@ window.__ModuleLoader__={
 		...preloads,
 		...bootstrap,
 		{ kind: "global", name: "__DSH_BOOT__", value: graph },
+		// The remote-access host package's own index row in a real host: this
+		// host's only principal is the owner, so the opening access baseline
+		// is the owner baseline (remoteAccess/follow re-issues it; see
+		// remote/streams.ts). Without it the client mounts as a non-owner
+		// with no grants and keeps its workspace/session surfaces empty.
+		{ kind: "global", name: "__DSH_REMOTE_ACCESS__", value: { type: "baseline", owner: true } },
 		{ kind: "script", placement: "body-end", text: BOOT_READY_SCRIPT },
 	];
 }

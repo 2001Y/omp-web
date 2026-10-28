@@ -58,16 +58,17 @@ describe("bootInjections", () => {
 		],
 	};
 
-	test("rows are queue script, application preload, bootstrap script, graph global, boot-ready", () => {
+	test("rows are queue script, application preload, bootstrap script, graph global, access baseline, boot-ready", () => {
 		const rows = bootInjections(graph);
-		expect(rows).toHaveLength(5);
+		expect(rows).toHaveLength(6);
 		expect(rows[0]).toMatchObject({ kind: "script" });
 		expect(rows[0].kind === "script" && rows[0].text).toContain("window.__ModuleLoader__");
 		expect(rows[1]).toMatchObject({ kind: "script-preload", src: "plugins/??r/client.js,d/client.js&rev=b2" });
 		expect(rows[2]).toMatchObject({ kind: "script-src", src: "plugins/??m/client.js&rev=b1" });
 		expect(rows[3]).toMatchObject({ kind: "global", name: "__DSH_BOOT__", value: graph });
-		expect(rows[4]).toMatchObject({ kind: "script", placement: "body-end" });
-		expect(rows[4].kind === "script" && rows[4].text).toContain("__DSH_BOOT_READY__");
+		expect(rows[4]).toMatchObject({ kind: "global", name: "__DSH_REMOTE_ACCESS__", value: { type: "baseline", owner: true } });
+		expect(rows[5]).toMatchObject({ kind: "script", placement: "body-end" });
+		expect(rows[5].kind === "script" && rows[5].text).toContain("__DSH_BOOT_READY__");
 	});
 
 	test("the graph global survives the full index render verbatim, and boot-ready lands before </body>", () => {
