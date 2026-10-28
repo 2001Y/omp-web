@@ -17,7 +17,7 @@ import type { WebDriver, WebStreamEvent } from "../protocol/driver";
 import type { WebAskOutcome, WebAskRequest } from "../protocol/interactions";
 import { parseApprovalResponse, parseQuestionResponse } from "../protocol/interactions";
 import { projectionsBaseline } from "./session";
-import { followSnapshot } from "./session";
+import { followSnapshot, requestArgs } from "./session";
 import { gatewayInternal, remoteError, type RpcError, serviceUnavailable } from "./wire";
 
 /** The socket surface the mux needs (Bun's ServerWebSocket satisfies it). */
@@ -351,8 +351,10 @@ export class RemoteStreams {
 				});
 				return;
 			}
-			// session/follow
-			const address = args.address as { kind?: unknown; sessionId?: unknown } | undefined;
+			// session/follow (its request object rides under args.request, like
+			// the unary session verbs — see requestArgs)
+			const req = requestArgs(args);
+			const address = req.address as { kind?: unknown; sessionId?: unknown } | undefined;
 			if (address?.kind !== "session" || typeof address.sessionId !== "string") {
 				this.#sendError(socket, streamId, remoteError("gateway/arguments-invalid", "omp-web: session/follow requires a session address"));
 				return;
@@ -360,8 +362,8 @@ export class RemoteStreams {
 			const sub: FollowSub = { kind: "follow", sessionId: address.sessionId, lastSeq: -1, buffered: [] };
 			state.subs.set(streamId, sub);
 			const snapshot = await followSnapshot(this.#driver, address.sessionId, {
-				...(typeof args.maxMessages === "number" ? { maxMessages: args.maxMessages } : {}),
-				...(args.assistantStream === true ? { assistantStream: true } : {}),
+				...(typeof req.maxMessages === "number" ? { maxMessages: req.maxMessages } : {}),
+				...(req.assistantStream === true ? { assistantStream: true } : {}),
 			});
 			this.#sendItem(socket, streamId, snapshot);
 			sub.lastSeq = snapshot.cursor;

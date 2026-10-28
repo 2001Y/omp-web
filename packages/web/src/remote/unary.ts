@@ -9,7 +9,7 @@
  */
 
 import type { WebDriver, WebPromptPart, WebQueueAction } from "../protocol/driver";
-import { followSnapshot, projectionsBaseline, sessionListValue, sessionPageValue } from "./session";
+import { followSnapshot, projectionsBaseline, requestArgs, sessionListValue, sessionPageValue } from "./session";
 import {
 	badRequest,
 	type ClientRequest,
@@ -79,18 +79,7 @@ function numberArg(args: Args, name: string): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/**
- * The field bag of a verb whose host signature takes ONE request object:
- * the wire carries that object under its parameter name (`args.request`),
- * while scalar-param verbs ride flat. Returns the flat bag unchanged when
- * no request object rides along, so both serializations validate by the
- * same field names. (Observed on the wire: workspace/create and the whole
- * session controller are request-shaped; directoryPicker stays flat.)
- */
-function requestArgs(args: Args): Args {
-	const request = args.request;
-	return typeof request === "object" && request !== null && !Array.isArray(request) ? (request as Args) : args;
-}
+
 
 /** Prompt content parts: text and image ride through; file receipts need the upload surface (later phase). */
 function parsePromptParts(raw: unknown): WebPromptPart[] | undefined {

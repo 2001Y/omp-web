@@ -14,6 +14,20 @@ import type { WebSessionEvent } from "../protocol/events";
 /** Projection values bag (JSON-safe values keyed by projection name). */
 export type ProjectionValues = Record<string, unknown>;
 
+/**
+ * The field bag of a verb whose host signature takes ONE request object:
+ * the wire carries that object under its parameter name (`args.request`),
+ * while scalar-param verbs ride flat. Returns the flat bag unchanged when
+ * no request object rides along, so both serializations validate by the
+ * same field names. (Observed on the wire: workspace/create, the whole
+ * session controller and the session/follow stream are request-shaped;
+ * directoryPicker stays flat.)
+ */
+export function requestArgs(args: Record<string, unknown>): Record<string, unknown> {
+	const request = args.request;
+	return typeof request === "object" && request !== null && !Array.isArray(request) ? (request as Record<string, unknown>) : args;
+}
+
 /** One projection baseline: values at an exact event cut. */
 export interface ProjectionBaseline {
 	asOfSeq: number;
