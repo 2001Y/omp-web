@@ -12,15 +12,13 @@
 
 import { createHash } from "node:crypto";
 import * as path from "node:path";
+import { deriveBootRoster } from "./roster";
 
 /**
- * The browser plugin roster of the dsh web profile: every Loader entry that
- * declares a `dsh.client` web half in `packages/bundle/web-app/cordis.patch.yml`
- * (including the `client-hmr` and `session-log-download` rows) plus the
- * dual-face base rows (`typert`, `typert-gateway`). The NATIVE directory
- * picker is deliberately absent: it drives a desktop-open dialog this web
- * host cannot serve; the browse picker (in-app dialog over host.listDirectory)
- * is rostered.
+ * Fallback browser roster for trees without bundle patches (legacy or
+ * fixture trees). Live trees derive their roster from their own
+ * `cordis.patch.yml` layers via {@link deriveBootRoster}; this list is
+ * the last 0.1.x-era hand roster, kept only so old trees still boot.
  */
 export const BOOT_ROSTER: readonly string[] = [
 	// web-app bundle patch browser roster
@@ -327,9 +325,10 @@ async function indexPackages(dshRoot: string): Promise<Map<string, string>> {
  */
 export async function composeBootGraph(
 	dshRoot: string,
-	roster: readonly string[] = BOOT_ROSTER,
+	roster?: readonly string[],
 	release?: { version: string; commit?: string },
 ): Promise<ComposedBoot> {
+	roster ??= (await deriveBootRoster(dshRoot)) ?? BOOT_ROSTER;
 	const packages = await indexPackages(dshRoot);
 	const table = new Map<string, BootPluginRecord>();
 	for (const id of roster) {
