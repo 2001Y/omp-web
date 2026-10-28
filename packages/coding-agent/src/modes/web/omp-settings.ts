@@ -1,31 +1,18 @@
 /**
- * OMP settings catalog projection: folds the unified settings schema
- * (`SETTINGS_SCHEMA`, single source of truth) into the wire catalog the web
+ * OMP settings catalog projection: folds the unified settings registry
+ * (single source of truth) into the wire catalog the web
  * settings sections render from — one tab per section, one group per titled
  * block, one field per UI-bearing setting. Pure data adaptation.
  */
 
 import type { WebOmpSettingsCatalog, WebSettingField, WebSettingOption, WebSettingTab } from "@oh-my-pi/web";
 import type { Settings } from "../../config/settings";
-import { SETTING_TABS, SETTINGS_SCHEMA, TAB_GROUPS, TAB_METADATA } from "../../config/settings-schema";
+import { type AnyUiMetadata, SETTING_TABS, TAB_GROUPS, TAB_METADATA } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import { orderedSettings } from "../../config/all-settings";
 
-type SchemaEntry = {
-	type?: string;
-	default?: unknown;
-	values?: readonly string[];
-	credential?: boolean;
-	ui?: {
-		tab: string;
-		group?: string;
-		label: string;
-		description: string;
-		warning?: string;
-		options?: ReadonlyArray<{ value: string; label: string; description?: string }> | "runtime";
-	};
-};
 
-function optionsOf(entry: SchemaEntry): WebSettingOption[] | undefined {
-	const raw = entry.ui?.options;
+function optionsOf(ui: AnyUiMetadata | undefined): WebSettingOption[] | undefined {
+	const raw = ui?.options;
 	if (raw === undefined || raw === "runtime") return undefined;
 	return raw.map(option => ({
 		value: option.value,
@@ -57,14 +44,16 @@ export function ompSettingsCatalog(
 ): WebOmpSettingsCatalog {
 	const byTab = new Map<string, Map<string, WebSettingField[]>>();
 	const groupOrder = new Map<string, string[]>();
-	for (const [key, definition] of Object.entries(SETTINGS_SCHEMA as unknown as Record<string, SchemaEntry>)) {
-		const ui = definition.ui;
+	for (const handle of orderedSettings()) {
+		const key = handle.id;
+		const definition = handle.definition;
+		const ui = handle.ui;
 		if (ui === undefined) continue;
 		const tabId = ui.tab;
 		if (!TAB_GROUPS[tabId as keyof typeof TAB_GROUPS]) continue;
 		let fields: WebSettingField[];
 		let type: WebSettingField["type"];
-		const options = optionsOf(definition);
+		const options = optionsOf(ui);
 		if (definition.type === "boolean") {
 			fields = push(tabId, ui.group);
 			type = "boolean";
@@ -86,7 +75,9 @@ export function ompSettingsCatalog(
 		}
 		let value: unknown;
 		try {
-			value = settings.get(key as never);
+			// Layered value only (what the settings panel shows and edits):
+			// environment-supplied values are never projected to the client.
+			value = handle.layered(settings);
 		} catch {
 			continue;
 		}
@@ -98,14 +89,14 @@ export function ompSettingsCatalog(
 			type,
 			value: value === undefined ? definition.default : value,
 			default: definition.default,
-			...(type === "enum" && definition.values !== undefined
+			...(type === "enum" && handle.enumValues !== undefined
 				? {
-						options: options ?? definition.values.map(value => ({ value, label: value })),
+						options: options ?? handle.enumValues.map(value => ({ value, label: value })),
 					}
 				: options !== undefined && type !== "boolean"
 					? { options }
 					: {}),
-			...(definition.credential === true ? { secret: true } : {}),
+			...(handle.isCredential ? { secret: true } : {}),
 		});
 	}
 	const tabs: WebSettingTab[] = [];

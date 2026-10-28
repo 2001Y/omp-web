@@ -52,10 +52,13 @@ import type {
 import { reset as resetCapabilities } from "../../capability";
 import { formatModelString } from "../../config/model-resolver";
 import { getKnownRoleIds, MODEL_ROLES } from "../../config/model-roles";
+import { lookup } from "../../config/registry";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { getSkillSlashCommandName } from "../../extensibility/skills";
 import { loadSlashCommands } from "../../extensibility/slash-commands";
 import type { Goal, GoalModeState } from "../../goals/state";
+import { cfgGoalContinuationModes, cfgGoalEnabled } from "../../goals/settings";
+import { cfgPlanEnabled } from "../../plan-mode/settings";
 import { resolveLocalUrlToPath } from "../../internal-urls/local-protocol";
 import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import backgroundTanDispatchPrompt from "../../prompts/system/background-tan-dispatch.md" with { type: "text" };
@@ -69,12 +72,13 @@ import { isUserQueuedMessage } from "../../session/queued-messages";
 import { CURRENT_SESSION_VERSION, type FileEntry, type SessionHeader } from "../../session/session-entries";
 import type { SessionInfo } from "../../session/session-listing";
 import { loadSessionFile } from "../../session/session-loader";
+import { cfgBranchSummaryEnabled } from "../../session/context-settings";
 import { SessionManager } from "../../session/session-manager";
 import { FileSessionStorage } from "../../session/session-storage";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
 import { createSubagentSettings } from "../../task/executor";
-import { normalizeLocalScheme } from "../../tools/path-utils";
+import { cfgTaskEnableLsp } from "../../task/settings";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "../../tools/todo";
 import { type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
 import {
@@ -83,9 +87,10 @@ import {
 	describeLoopLimitRuntime,
 	isLoopDurationExpired,
 	type LoopLimitRuntime,
-	parseLoopLimitArgs,
+	parseLoopArgs,
 } from "../loop-limit";
 import { tryRunRpcSkillCommand } from "../rpc/rpc-mode";
+import { cfgLoopMode } from "../settings";
 import { collectSessionAttachments } from "./attachments";
 import { forkSessionFile } from "./fork";
 import { projectHistoryTree } from "./history-tree";
@@ -580,7 +585,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	#scheduleGoalContinuation(): void {
 		this.#cancelGoalContinuation();
 		if (this.#loopEnabled) return;
-		if (!this.#session.settings.get("goal.continuationModes").includes("interactive")) return;
+		if (!cfgGoalContinuationModes.get(this.#session.settings).includes("interactive")) return;
 		if (this.#session.getPlanModeState() !== undefined) return;
 		if (this.#goalSuppressNextContinuation) return;
 		const state = this.#session.getGoalModeState();
@@ -1115,7 +1120,9 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	}
 
 	async setOmpSetting(key: string, value: unknown): Promise<void> {
-		this.#session.settings.set(key as never, value as never);
+		const handle = lookup(key);
+		if (handle === undefined) throw new Error(`omp-web: unknown setting "${key}"`);
+		handle.set(this.#session.settings, value);
 	}
 
 	async logoutProvider(provider: string): Promise<void> {
@@ -1534,7 +1541,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		if (trimmed === "") throw new Error("omp-web: goals/create requires a non-empty objective");
 		if (this.#session.getPlanModeState()?.enabled === true) throw new Error("omp-web: exit plan mode first");
 		if (this.#session.getVibeModeState()?.enabled === true) throw new Error("omp-web: exit vibe mode first");
-		if (!this.#session.settings.get("goal.enabled")) throw new Error("omp-web: goal mode is disabled");
+		if (!cfgGoalEnabled.get(this.#session.settings)) throw new Error("omp-web: goal mode is disabled");
 		const state = await this.#session.goalRuntime.createGoal({ objective: trimmed });
 		const tools = this.#session.getEnabledToolNames();
 		if (!tools.includes("goal")) await this.#session.setActiveToolsByName([...tools, "goal"]);
@@ -1976,7 +1983,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		const wants = trimmed === "off" ? false : trimmed === "on" ? true : !state?.enabled;
 		const sessionId = this.#session.sessionId;
 		if (wants) {
-			if (!this.#session.settings.get("plan.enabled")) {
+			if (!cfgPlanEnabled.get(this.#session.settings)) {
 				return { ok: false, text: "Plan mode is disabled (plan.enabled in settings)." };
 			}
 			if (this.#session.getGoalModeState()?.enabled) {
@@ -2261,7 +2268,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	async #startGoal(objective: string): Promise<{ ok: boolean; text: string }> {
 		if (this.#session.getPlanModeState()?.enabled === true) return { ok: false, text: "Exit plan mode first." };
 		if (this.#session.getVibeModeState()?.enabled === true) return { ok: false, text: "Exit vibe mode first." };
-		if (!this.#session.settings.get("goal.enabled")) {
+		if (!cfgGoalEnabled.get(this.#session.settings)) {
 			return { ok: false, text: "Goal mode is disabled. Enable it in settings (goal.enabled)." };
 		}
 		try {
@@ -2293,7 +2300,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	async #executeGuidedGoalCommand(args: string): Promise<{ ok: boolean; text: string }> {
 		if (this.#session.getPlanModeState()?.enabled === true) return { ok: false, text: "Exit plan mode first." };
 		if (this.#session.getVibeModeState()?.enabled === true) return { ok: false, text: "Exit vibe mode first." };
-		if (!this.#session.settings.get("goal.enabled")) {
+		if (!cfgGoalEnabled.get(this.#session.settings)) {
 			return { ok: false, text: "Goal mode is disabled. Enable it in settings (goal.enabled)." };
 		}
 		const existing = this.#session.getGoalModeState();
@@ -2326,9 +2333,9 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 			this.#disableLoop("Loop mode disabled.");
 			return { ok: true, text: "Loop mode disabled." };
 		}
-		const parsed = parseLoopLimitArgs(args);
+		const parsed = parseLoopArgs(args);
 		if (typeof parsed === "string") return { ok: false, text: parsed };
-		const loopMode = this.#session.settings.get("loop.mode");
+		const loopMode = cfgLoopMode.get(this.#session.settings);
 		if (loopMode !== "prompt") {
 			return {
 				ok: false,
@@ -2399,7 +2406,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		};
 		const sessionDir = parentFile.slice(0, -6);
 		const settings = createSubagentSettings(session.settings);
-		const enableLsp = session.settings.get("task.enableLsp") !== false;
+		const enableLsp = cfgTaskEnableLsp.get(session.settings) !== false;
 		const agentRegistry = AgentRegistry.global();
 		const cloneId = `Tan-${Snowflake.next()}`;
 		const cloneFile = path.join(sessionDir, `${cloneId}.jsonl`);
@@ -2595,7 +2602,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	 * card (approval itself flows through the write-approval panel).
 	 */
 	async #executePlanReviewCommand(): Promise<{ ok: boolean; text: string }> {
-		const localRoot = resolveLocalUrlToPath(normalizeLocalScheme("local://"), {
+		const localRoot = resolveLocalUrlToPath("local://", {
 			getArtifactsDir: () => this.#session.sessionManager.getArtifactsDir(),
 			getSessionId: () => this.#session.sessionManager.getSessionId(),
 		});
@@ -2647,7 +2654,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		// plan active for it too, and conservative beats permissive for a
 		// write-restricting mode.
 		const planPersisted =
-			(mode === "plan" || mode === "plan_paused") && this.#session.settings.get("plan.enabled") === true;
+			(mode === "plan" || mode === "plan_paused") && cfgPlanEnabled.get(this.#session.settings) === true;
 		if (planPersisted) {
 			const planFilePath =
 				(context.modeData?.planFilePath as string | undefined) ||
@@ -2685,7 +2692,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		// Goal: restore the persisted goal (the goal tool rejoins the set — the
 		// SDK excludes it from the initial set unconditionally); clear leaks.
 		const goal = mode === "goal" || mode === "goal_paused" ? goalFromModeData(context.modeData) : undefined;
-		if (goal !== undefined && this.#session.settings.get("goal.enabled") !== false) {
+		if (goal !== undefined && cfgGoalEnabled.get(this.#session.settings) !== false) {
 			this.#session.setGoalModeState({ enabled: mode === "goal", mode: "active", goal });
 			const tools = this.#session.getEnabledToolNames();
 			if (!tools.includes("goal")) await this.#session.setActiveToolsByName([...tools, "goal"]);
@@ -2716,7 +2723,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		}
 		return {
 			nodes: projectHistoryTree(manager.getEntries(), labels, manager.getLeafId()),
-			branchSummariesEnabled: this.#session.settings.get("branchSummary.enabled") === true,
+			branchSummariesEnabled: cfgBranchSummaryEnabled.get(this.#session.settings) === true,
 		};
 	}
 
