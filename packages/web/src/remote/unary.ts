@@ -79,6 +79,19 @@ function numberArg(args: Args, name: string): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * The field bag of a verb whose host signature takes ONE request object:
+ * the wire carries that object under its parameter name (`args.request`),
+ * while scalar-param verbs ride flat. Returns the flat bag unchanged when
+ * no request object rides along, so both serializations validate by the
+ * same field names. (Observed on the wire: workspace/create and the whole
+ * session controller are request-shaped; directoryPicker stays flat.)
+ */
+function requestArgs(args: Args): Args {
+	const request = args.request;
+	return typeof request === "object" && request !== null && !Array.isArray(request) ? (request as Args) : args;
+}
+
 /** Prompt content parts: text and image ride through; file receipts need the upload surface (later phase). */
 function parsePromptParts(raw: unknown): WebPromptPart[] | undefined {
 	if (!Array.isArray(raw) || raw.length === 0) return undefined;
@@ -122,29 +135,30 @@ function parseQueueAction(raw: unknown): WebQueueAction | undefined {
 }
 
 async function dispatchSession(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
+	const req = requestArgs(args);
 	switch (method) {
 		case "list":
 			return ok(await sessionListValue(driver));
 		case "search": {
-			const query = stringArg(args, "query");
+			const query = stringArg(req, "query");
 			if (query === undefined) return fail("gateway/arguments-invalid", "omp-web: session/search requires query");
 			return ok(await driver.searchSessions(query));
 		}
 		case "create": {
-			const workspaceId = stringArg(args, "workspaceId") ?? stringArg(args, "cwd");
+			const workspaceId = stringArg(req, "workspaceId") ?? stringArg(req, "cwd");
 			const created = await driver.createSession({
 				...(workspaceId !== undefined ? { workspaceId } : {}),
 			});
 			return ok(created);
 		}
 		case "selectModel": {
-			const sessionId = stringArg(args, "sessionId");
-			const provider = stringArg(args, "provider");
-			const model = stringArg(args, "model");
+			const sessionId = stringArg(req, "sessionId");
+			const provider = stringArg(req, "provider");
+			const model = stringArg(req, "model");
 			if (sessionId === undefined || provider === undefined || model === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/selectModel requires sessionId, provider, model");
 			}
-			const reasoningEffort = stringArg(args, "reasoningEffort");
+			const reasoningEffort = stringArg(req, "reasoningEffort");
 			return ok(
 				await driver.selectModel(sessionId, {
 					provider,
@@ -179,36 +193,36 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 			return ok(host.canOpenPath);
 		}
 		case "rename": {
-			const sessionId = stringArg(args, "sessionId");
-			const title = stringArg(args, "title");
+			const sessionId = stringArg(req, "sessionId");
+			const title = stringArg(req, "title");
 			if (sessionId === undefined || title === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/rename requires sessionId and title");
 			}
 			return ok(await driver.rename(sessionId, title));
 		}
 		case "fork": {
-			const sessionId = stringArg(args, "sessionId");
+			const sessionId = stringArg(req, "sessionId");
 			if (sessionId === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/fork requires sessionId");
 			}
-			const atSeq = numberArg(args, "atSeq");
+			const atSeq = numberArg(req, "atSeq");
 			return ok(await driver.fork(sessionId, { ...(atSeq !== undefined ? { atSeq } : {}) }));
 		}
 		case "prompt": {
-			const sessionId = stringArg(args, "sessionId");
+			const sessionId = stringArg(req, "sessionId");
 			if (sessionId === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/prompt requires sessionId");
 			}
-			const parts = parsePromptParts(args.content);
+			const parts = parsePromptParts(req.content);
 			if (parts === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/prompt requires text or image content parts");
 			}
-			await driver.prompt(sessionId, parts, { ...(args.mode === "steer" ? { mode: "steer" as const } : {}) });
+			await driver.prompt(sessionId, parts, { ...(req.mode === "steer" ? { mode: "steer" as const } : {}) });
 			return ok({ accepted: true });
 		}
 		case "attachment": {
-			const sessionId = stringArg(args, "sessionId");
-			const attachmentId = stringArg(args, "attachmentId");
+			const sessionId = stringArg(req, "sessionId");
+			const attachmentId = stringArg(req, "attachmentId");
 			if (sessionId === undefined || attachmentId === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/attachment requires sessionId and attachmentId");
 			}
@@ -217,9 +231,9 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 			return ok(found);
 		}
 		case "updateQueue": {
-			const sessionId = stringArg(args, "sessionId");
-			const itemId = stringArg(args, "itemId");
-			const action = parseQueueAction(args.action);
+			const sessionId = stringArg(req, "sessionId");
+			const itemId = stringArg(req, "itemId");
+			const action = parseQueueAction(req.action);
 			if (sessionId === undefined || itemId === undefined || action === undefined) {
 				return fail(
 					"gateway/arguments-invalid",
@@ -230,7 +244,7 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 			return ok({ accepted: true });
 		}
 		case "cancel": {
-			const sessionId = stringArg(args, "sessionId");
+			const sessionId = stringArg(req, "sessionId");
 			if (sessionId === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/cancel requires sessionId");
 			}
@@ -238,11 +252,11 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 			return ok({ accepted: true });
 		}
 		case "page": {
-			const address = args.address as { kind?: unknown; sessionId?: unknown } | undefined;
+			const address = req.address as { kind?: unknown; sessionId?: unknown } | undefined;
 			if (address?.kind !== "session" || typeof address.sessionId !== "string") {
 				return fail("gateway/arguments-invalid", "omp-web: session/page requires a session address");
 			}
-			const throughSeq = numberArg(args, "throughSeq");
+			const throughSeq = numberArg(req, "throughSeq");
 			if (throughSeq === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/page requires throughSeq");
 			}
@@ -250,13 +264,13 @@ async function dispatchSession(driver: WebDriver, method: string, args: Args): P
 				await sessionPageValue(driver, {
 					sessionId: address.sessionId,
 					throughSeq,
-					...(numberArg(args, "beforeSeq") !== undefined ? { beforeSeq: numberArg(args, "beforeSeq") } : {}),
-					...(numberArg(args, "maxMessages") !== undefined ? { maxMessages: numberArg(args, "maxMessages") } : {}),
+					...(numberArg(req, "beforeSeq") !== undefined ? { beforeSeq: numberArg(req, "beforeSeq") } : {}),
+					...(numberArg(req, "maxMessages") !== undefined ? { maxMessages: numberArg(req, "maxMessages") } : {}),
 				}),
 			);
 		}
 		case "projections": {
-			const sessionId = stringArg(args, "sessionId");
+			const sessionId = stringArg(req, "sessionId");
 			if (sessionId === undefined) {
 				return fail("gateway/arguments-invalid", "omp-web: session/projections requires sessionId");
 			}
@@ -356,11 +370,8 @@ async function dispatchOmpHistory(driver: WebDriver, method: string, args: Args)
  * unarchive) answer methodUnavailable rather than being approximated.
  */
 async function dispatchWorkspace(driver: WebDriver, method: string, args: Args): Promise<RpcResult<unknown>> {
-	// Every workspace verb takes one request object, which the wire carries
-	// nested as `args.request` (scalar-param namespaces ride flat instead).
-	const request = args.request;
-	const req: Args =
-		typeof request === "object" && request !== null && !Array.isArray(request) ? (request as Args) : {};
+	// Every workspace verb takes one request object (see requestArgs).
+	const req = requestArgs(args);
 	switch (method) {
 		case "create": {
 			const path = stringArg(req, "path");

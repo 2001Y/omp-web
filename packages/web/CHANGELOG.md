@@ -23,6 +23,7 @@
 - `settings.mutate`-adjacent hardening: `fileReferences/list` refuses `..`/absolute path segments escaping the session cwd.
 - `redactedThinking` blocks no longer render their provider-opaque blob as reasoning text.
 - The hero's "Choose workspace" flow works: the unary dispatcher now routes `workspace/*` (create/rename/delete/ordering/session archive) and `directoryPicker/*` (directory list/create for the browse picker) to the driver instead of answering `gateway/service-unavailable` for both namespaces, and the boot roster pins the browse directory-picker client package (the bundle layers only name its host-side `-auto` counterpart, which ships no client face — without the pin the picker's directory-flow slots stay empty and the anchor gesture shows nothing). Host directories can now be browsed and adopted as workspaces.
+- Model selection, prompting, session search/rename/fork/cancel, history paging and starting a session in a chosen workspace now work: every `session/*` verb takes one request object on the wire, and the dispatcher reads its fields from that object instead of expecting flat arguments (model selection previously failed with `gateway/arguments-invalid`, and a new session silently opened in the server's own directory instead of the chosen workspace).
 
 ### Added (omp-web M18)
 

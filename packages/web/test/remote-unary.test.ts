@@ -75,28 +75,40 @@ describe("remote unary dispatcher", () => {
 
 	test("session/prompt validates parts and reaches the driver; file parts are rejected for now", async () => {
 		const driver = fakeDriver();
+		// The session controller's verbs take one request object, carried
+		// nested as args.request on the wire.
 		const response = await dispatch(driver, "session/prompt", {
-			requestId: "req-1",
-			sessionId: "s1",
-			mode: "queue",
-			content: [{ type: "text", text: "hello" }],
+			request: { requestId: "req-1", sessionId: "s1", mode: "queue", content: [{ type: "text", text: "hello" }] },
 		});
 		expect(response.result).toEqual({ ok: true, value: { accepted: true } });
 		expect(driver.state.prompts).toEqual([{ sessionId: "s1", text: "hello" }]);
 		const fileResponse = await dispatch(driver, "session/prompt", {
-			requestId: "req-2",
-			sessionId: "s1",
-			mode: "queue",
-			content: [{ type: "file", receiptId: "rcpt-1" }],
+			request: { requestId: "req-2", sessionId: "s1", mode: "queue", content: [{ type: "file", receiptId: "rcpt-1" }] },
 		});
 		expect(fileResponse.result).toMatchObject({ ok: false, error: { code: "gateway/arguments-invalid" } });
+	});
+
+	test("session/selectModel reads sessionId/provider/model from the nested request object", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "session/selectModel", {
+			request: { sessionId: "s1", provider: "p", model: "m" },
+		});
+		expect(response.result).toEqual({ ok: true, value: { selected: { provider: "p", model: "m" } } });
+		const missing = await dispatch(driver, "session/selectModel", { request: { sessionId: "s1" } });
+		expect(missing.result).toMatchObject({ ok: false, error: { code: "gateway/arguments-invalid" } });
+	});
+
+	test("session/create passes the request's workspaceId to the driver", async () => {
+		const driver = fakeDriver();
+		const response = await dispatch(driver, "session/create", { request: { workspaceId: "/work" } });
+		expect(response.result).toEqual({ ok: true, value: { sessionId: "s-new" } });
+		expect(driver.state.created).toEqual([{ workspaceId: "/work" }]);
 	});
 
 	test("session/page wraps journal events as records at or below throughSeq", async () => {
 		const driver = fakeDriver({ history: historyFixture() });
 		const response = await dispatch(driver, "session/page", {
-			address: { kind: "session", sessionId: "s1" },
-			throughSeq: 0,
+			request: { address: { kind: "session", sessionId: "s1" }, throughSeq: 0 },
 		});
 		if (!response.result.ok) throw new Error("expected ok result");
 		const value = response.result.value as { records: Array<{ type: string; event: { seq: number } }>; hasMore: boolean };
@@ -106,7 +118,7 @@ describe("remote unary dispatcher", () => {
 
 	test("session/projections answers a sequenced baseline seeded from history", async () => {
 		const driver = fakeDriver({ history: historyFixture() });
-		const response = await dispatch(driver, "session/projections", { sessionId: "s1" });
+		const response = await dispatch(driver, "session/projections", { request: { sessionId: "s1" } });
 		if (!response.result.ok) throw new Error("expected ok result");
 		const value = response.result.value as { kind: string; asOfSeq: number; values: Record<string, unknown> };
 		expect(value.kind).toBe("sequenced");
