@@ -43,24 +43,40 @@ describe("bootInjections", () => {
 	const graph: WebBootGraph = {
 		rev: "abc123",
 		entries: [
-			{ id: "@deepseek-ai/dsh-client-modules", url: "/plugins/m/client.js?rev=1", rev: "1" },
-			{ id: "@deepseek-ai/dsh-client-runtime", url: "/plugins/r/client.js?rev=2", rev: "2" },
-			{ id: "@deepseek-ai/dsh-client-ui-demo", url: "/plugins/d/client.js?rev=3", rev: "3" },
+			{ id: "@deepseek-ai/dsh-client-modules", url: "plugins/??m/client.js&rev=1", rev: "1" },
+			{ id: "@deepseek-ai/dsh-client-runtime", url: "plugins/??r/client.js&rev=2", rev: "2" },
+			{ id: "@deepseek-ai/dsh-client-ui-demo", url: "plugins/??d/client.js&rev=3", rev: "3" },
+		],
+		batches: [
+			{ phase: "bootstrap", url: "plugins/??m/client.js&rev=b1", rev: "b1", entries: ["@deepseek-ai/dsh-client-modules"] },
+			{
+				phase: "application",
+				url: "plugins/??r/client.js,d/client.js&rev=b2",
+				rev: "b2",
+				entries: ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-demo"],
+			},
 		],
 	};
 
-	test("rows are queue script, modules+runtime preloads, then the graph global", () => {
+	test("rows are queue script, application preload, bootstrap script, graph global, boot-ready", () => {
 		const rows = bootInjections(graph);
-		expect(rows).toHaveLength(4);
+		expect(rows).toHaveLength(5);
 		expect(rows[0]).toMatchObject({ kind: "script" });
 		expect(rows[0].kind === "script" && rows[0].text).toContain("window.__ModuleLoader__");
-		expect(rows[1]).toMatchObject({ kind: "script-src", src: "/plugins/m/client.js?rev=1" });
-		expect(rows[2]).toMatchObject({ kind: "script-src", src: "/plugins/r/client.js?rev=2" });
+		expect(rows[1]).toMatchObject({ kind: "script-preload", src: "plugins/??r/client.js,d/client.js&rev=b2" });
+		expect(rows[2]).toMatchObject({ kind: "script-src", src: "plugins/??m/client.js&rev=b1" });
 		expect(rows[3]).toMatchObject({ kind: "global", name: "__DSH_BOOT__", value: graph });
+		expect(rows[4]).toMatchObject({ kind: "script", placement: "body-end" });
+		expect(rows[4].kind === "script" && rows[4].text).toContain("__DSH_BOOT_READY__");
 	});
 
-	test("the graph global survives the full index render verbatim", () => {
-		const out = renderIndexInjections("<html><head></head><body></body></html>", bootInjections(graph));
+	test("the graph global survives the full index render verbatim, and boot-ready lands before </body>", () => {
+		const out = renderIndexInjections("<html><head></head><body><main></main></body></html>", bootInjections(graph));
 		expect(out).toContain('globalThis["__DSH_BOOT__"] = {"rev":"abc123"');
+		const ready = out.indexOf("__DSH_BOOT_READY__");
+		expect(ready).toBeGreaterThan(out.indexOf("</main>"));
+		expect(ready).toBeLessThan(out.indexOf("</body>"));
+		// The application batch is a preload hint, not an executing script.
+		expect(out).toContain('<link rel="preload" as="script" href="plugins/??r/client.js,d/client.js&rev=b2">');
 	});
 });

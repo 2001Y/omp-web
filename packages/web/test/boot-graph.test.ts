@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { composeBootGraph, orderByModuleGraph, stripClientSuffix, type WebBootEntry } from "../src/boot/graph";
+import {
+	COMBO_URL_BYTE_LIMIT,
+	composeBatches,
+	composeBootGraph,
+	orderByModuleGraph,
+	stripClientSuffix,
+	type WebBootEntry,
+} from "../src/boot/graph";
 import { buildFixtureTree, type FixtureTree } from "./helpers";
 
 const TREES: FixtureTree[] = [];
@@ -62,7 +69,7 @@ describe("composeBootGraph", () => {
 			"@deepseek-ai/dsh-client-runtime",
 		]);
 		const demo = graph.entries.find(row => row.id === "@deepseek-ai/dsh-client-ui-demo");
-		expect(demo?.url).toMatch(/^\/plugins\/@deepseek-ai\/dsh-client-ui-demo\/client.js\?rev=[0-9a-f]{12}$/);
+		expect(demo?.url).toMatch(/^plugins\/\?\?@deepseek-ai\/dsh-client-ui-demo\/client\.js&rev=[0-9a-f]{12}$/);
 		expect(demo?.external).toEqual(["@deepseek-ai/dsh-client-modules"]);
 		const runtime = graph.entries.find(row => row.id === "@deepseek-ai/dsh-client-runtime");
 		expect(runtime?.immediately).toBe(true);
@@ -70,6 +77,23 @@ describe("composeBootGraph", () => {
 		expect(table.get("@deepseek-ai/dsh-client-modules")?.clientPath).toBe(
 			`${tree.root}/packages/client/modules/lib/client.js`,
 		);
+		// Batches: bootstrap is client-modules alone; every entry is in exactly one batch.
+		expect(graph.batches[0]).toMatchObject({ phase: "bootstrap", entries: ["@deepseek-ai/dsh-client-modules"] });
+		const membership = graph.batches.flatMap(batch => batch.entries);
+		expect(membership.toSorted()).toEqual(graph.entries.map(row => row.id).toSorted());
+		expect(new Set(membership).size).toBe(membership.length);
+	});
+
+	test("application batches split so no combo URL exceeds the byte limit", () => {
+		const longId = (n: number) => `@deepseek-ai/dsh-client-ui-${"x".repeat(120)}-${String(n).padStart(3, "0")}`;
+		const entries = Array.from({ length: 40 }, (_, i) => entry(longId(i)));
+		const batches = composeBatches(entries);
+		expect(batches.length).toBeGreaterThan(1);
+		for (const batch of batches) {
+			expect(new TextEncoder().encode(batch.url).length).toBeLessThanOrEqual(COMBO_URL_BYTE_LIMIT);
+			expect(batch.entries.length).toBeGreaterThan(0);
+		}
+		expect(batches.flatMap(batch => batch.entries)).toEqual(entries.map(row => row.id));
 	});
 
 	test("a roster package missing a built bundle fails naming the path", async () => {

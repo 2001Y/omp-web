@@ -457,7 +457,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			return handleApi(req, server, rawPathname);
 		}
 		if (rawPathname.startsWith("/plugins/")) {
-			return handlePluginBundle(req, rawPathname);
+			return handlePluginBundle(req, new URL(req.url));
 		}
 		return serveStatic(decodeURIComponent(rawPathname), req.method, distRoot, distIndex, async () => indexHtml);
 	}
@@ -580,11 +580,39 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		}
 	}
 
-	async function handlePluginBundle(req: Request, rawPathname: string): Promise<Response> {
+	async function handlePluginBundle(req: Request, url: URL): Promise<Response> {
 		if (req.method !== "GET" && req.method !== "HEAD") {
 			return new Response(null, { status: 405 });
 		}
-		const pathname = decodeURIComponent(rawPathname);
+		// Combo form (dsh 0.2.x): `/plugins/??<id>/client.js,<id>/client.js&rev=<rev>`
+		// — the `??` list lives in the query string; members are concatenated
+		// in list order. Source-map members (`<id>/client.js.map`) work the same.
+		if (url.pathname === "/plugins/" && url.search.startsWith("??")) {
+			const list = url.search.slice(2).split("&", 1)[0] ?? "";
+			const members = list.split(",").filter(member => member !== "");
+			if (members.length === 0) return new Response(null, { status: 404 });
+			const parts: string[] = [];
+			let allMaps = true;
+			for (const member of members) {
+				const isMap = member.endsWith("/client.js.map");
+				if (!isMap && !member.endsWith("/client.js")) return new Response(null, { status: 404 });
+				if (!isMap) allMaps = false;
+				const id = member.slice(0, member.lastIndexOf("/client.js"));
+				const clientPath = boot.table.get(id)?.clientPath;
+				if (clientPath === undefined) return new Response(null, { status: 404 });
+				const file = Bun.file(isMap ? `${clientPath}.map` : clientPath);
+				if (!(await file.exists())) return new Response(null, { status: 404 });
+				if (req.method === "GET") parts.push(await file.text());
+			}
+			return new Response(req.method === "HEAD" ? null : parts.join("\n"), {
+				status: 200,
+				headers: {
+					"content-type": allMaps ? "application/json; charset=utf-8" : "text/javascript; charset=utf-8",
+					"cache-control": "no-cache",
+				},
+			});
+		}
+		const pathname = decodeURIComponent(url.pathname);
 		const prefix = "/plugins/";
 		const mapSuffix = "/client.js.map";
 		const bundleSuffix = "/client.js";

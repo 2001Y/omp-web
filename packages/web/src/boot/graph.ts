@@ -78,11 +78,17 @@ export const BOOT_ROSTER: readonly string[] = [
 	"@omp/client-settings",
 ];
 
+/** The bootstrap package: its bundle supplies the module-system implementation. */
+export const BOOTSTRAP_PACKAGE_ID = "@deepseek-ai/dsh-client-modules";
+
+/** Byte cap on one combo (concatenated bundle) URL, per the dsh client-modules node half. */
+export const COMBO_URL_BYTE_LIMIT = 3072;
+
 /** One composed browser entry pushed to the boot graph (wire shape). */
 export interface WebBootEntry {
 	/** Entry name == package name. */
 	id: string;
-	/** Bundle endpoint, `/plugins/<id>/client.js?rev=<rev>`. */
+	/** Combo reference to this entry's bundle, `plugins/??<id>/client.js&rev=<rev>` (document-relative). */
 	url: string;
 	/** Bundle content hash (cache-busting consistency anchor). */
 	rev: string;
@@ -94,12 +100,68 @@ export interface WebBootEntry {
 	external?: string[];
 }
 
+/** One initial-load batch of the boot graph (wire shape, dsh 0.2.x). */
+export interface WebBootBatch {
+	/** Load phase: the bootstrap batch runs parser-blocking; application batches are preloaded. */
+	phase: "bootstrap" | "application";
+	/** Combo reference covering every entry in `entries`, in order. */
+	url: string;
+	/** Consistency anchor over the member bundles' revs. */
+	rev: string;
+	/** Member entry ids, in load order. Every graph entry belongs to exactly one batch. */
+	entries: string[];
+}
+
 /** The composed entry graph injected as `window.__DSH_BOOT__`. */
 export interface WebBootGraph {
 	/** Consistency anchor over the whole graph. */
 	rev: string;
+	/** Release identity of the vendored dsh tree, when known. */
+	release?: { version: string; commit?: string };
 	/** Entries in module-graph order. */
 	entries: WebBootEntry[];
+	/** Initial-load batches covering every entry exactly once (required since dsh 0.2.x). */
+	batches: WebBootBatch[];
+}
+
+/** Document-relative combo reference for a set of bundles, in load order. */
+export function comboUrl(ids: readonly string[], rev: string): string {
+	return `plugins/??${ids.map(id => `${id}/client.js`).join(",")}&rev=${rev}`;
+}
+
+const utf8 = new TextEncoder();
+
+/**
+ * Group ordered entries into initial-load batches: the bootstrap package
+ * alone forms the bootstrap batch; the remaining entries are packed in
+ * graph order into application batches whose combo URL stays within
+ * {@link COMBO_URL_BYTE_LIMIT}.
+ */
+export function composeBatches(entries: readonly WebBootEntry[]): WebBootBatch[] {
+	const batches: WebBootBatch[] = [];
+	const batchOf = (phase: WebBootBatch["phase"], members: readonly WebBootEntry[]): WebBootBatch => {
+		const ids = members.map(entry => entry.id);
+		const rev = shortHash(members.map(entry => entry.rev).join(","));
+		return { phase, url: comboUrl(ids, rev), rev, entries: ids };
+	};
+	const bootstrap = entries.filter(entry => entry.id === BOOTSTRAP_PACKAGE_ID);
+	if (bootstrap.length > 0) batches.push(batchOf("bootstrap", bootstrap));
+	let current: WebBootEntry[] = [];
+	for (const entry of entries) {
+		if (entry.id === BOOTSTRAP_PACKAGE_ID) continue;
+		const trial = [...current, entry];
+		const trialUrl = comboUrl(
+			trial.map(row => row.id),
+			"0".repeat(12),
+		);
+		if (current.length > 0 && utf8.encode(trialUrl).length > COMBO_URL_BYTE_LIMIT) {
+			batches.push(batchOf("application", current));
+			current = [];
+		}
+		current.push(entry);
+	}
+	if (current.length > 0) batches.push(batchOf("application", current));
+	return batches;
 }
 
 /** One roster package resolved for serving: wire entry plus bundle location. */
@@ -226,11 +288,11 @@ function clientExportOf(pkgName: string, exportsField: unknown): string | undefi
 	throw new Error(`web boot: ${pkgName} exports["./client"] must be a string or an object with a string default`);
 }
 
-/** Graph row for one bundle rev (url carries the rev as its cache-busting query). */
+/** Graph row for one bundle rev (url is the single-bundle combo reference). */
 function graphRow(id: string, rev: string, decl: DshClientDeclaration): WebBootEntry {
 	return {
 		id,
-		url: `/plugins/${id}/client.js?rev=${rev}`,
+		url: comboUrl([id], rev),
 		rev,
 		...(decl.inject !== undefined ? { inject: decl.inject } : {}),
 		...(decl.immediately === true ? { immediately: true } : {}),
@@ -266,6 +328,7 @@ async function indexPackages(dshRoot: string): Promise<Map<string, string>> {
 export async function composeBootGraph(
 	dshRoot: string,
 	roster: readonly string[] = BOOT_ROSTER,
+	release?: { version: string; commit?: string },
 ): Promise<ComposedBoot> {
 	const packages = await indexPackages(dshRoot);
 	const table = new Map<string, BootPluginRecord>();
@@ -295,5 +358,12 @@ export async function composeBootGraph(
 		table.set(id, { entry: graphRow(id, rev, decl), clientPath });
 	}
 	const entries = orderByModuleGraph([...table.values()].map(record => record.entry));
-	return { graph: { rev: shortHash(JSON.stringify(entries)), entries }, table };
+	const batches = composeBatches(entries);
+	const graph: WebBootGraph = {
+		rev: shortHash(JSON.stringify({ entries, batches })),
+		...(release !== undefined ? { release } : {}),
+		entries,
+		batches,
+	};
+	return { graph, table };
 }

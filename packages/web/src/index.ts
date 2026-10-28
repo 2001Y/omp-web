@@ -7,8 +7,17 @@
  * interface; this package never imports the coding agent.
  */
 
-export type { BootPluginRecord, ComposedBoot, WebBootEntry, WebBootGraph } from "./boot/graph";
-export { BOOT_ROSTER, composeBootGraph, orderByModuleGraph, stripClientSuffix } from "./boot/graph";
+export type { BootPluginRecord, ComposedBoot, WebBootBatch, WebBootEntry, WebBootGraph } from "./boot/graph";
+export {
+	BOOT_ROSTER,
+	BOOTSTRAP_PACKAGE_ID,
+	COMBO_URL_BYTE_LIMIT,
+	comboUrl,
+	composeBatches,
+	composeBootGraph,
+	orderByModuleGraph,
+	stripClientSuffix,
+} from "./boot/graph";
 export type { IndexInjection, IndexInjectionPlacement } from "./boot/inject";
 export { bootInjections, renderIndexInjections } from "./boot/inject";
 export type {

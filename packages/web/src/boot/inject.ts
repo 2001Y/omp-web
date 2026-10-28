@@ -10,8 +10,8 @@
 
 import type { WebBootGraph } from "./graph";
 
-/** Document region a rendered row lands in: after the opening head or body tag. */
-export type IndexInjectionPlacement = "head" | "body";
+/** Document region a rendered row lands in: after the opening head/body tag, or before the closing body tag. */
+export type IndexInjectionPlacement = "head" | "body" | "body-end";
 
 /** One structured index injection row. */
 export type IndexInjection =
@@ -21,6 +21,8 @@ export type IndexInjection =
 	| { kind: "script"; placement: IndexInjectionPlacement; text: string }
 	/** External classic script, executed in table order. */
 	| { kind: "script-src"; placement: IndexInjectionPlacement; src: string }
+	/** A `<link rel="preload" as="script">` fetch hint in the head. */
+	| { kind: "script-preload"; src: string }
 	/** A `<style>` element in the head. */
 	| { kind: "style"; text: string }
 	/** Raw markup fragment. */
@@ -29,11 +31,8 @@ export type IndexInjection =
 /** Bootstrap package whose ordinary client bundle supplies the module-system implementation. */
 const CLIENT_MODULES_ID = "@deepseek-ai/dsh-client-modules";
 
-/** Dynamic package whose ordinary client bundle must be registered before plugin boot starts. */
-const CLIENT_RUNTIME_ID = "@deepseek-ai/dsh-client-runtime";
-
-/** Ordinary dynamic bundles the HTML parser executes before the Vite shell. */
-const PARSER_PRELOAD_IDS = [CLIENT_MODULES_ID, CLIENT_RUNTIME_ID] as const;
+/** Body-end script resolving the boot-ready deferred the client entry awaits before reading boot state. */
+const BOOT_READY_SCRIPT = "(globalThis.__DSH_BOOT_READY__ ??= Promise.withResolvers()).resolve()";
 
 /** Render one row to markup with its placement. */
 function renderRow(row: IndexInjection): { placement: IndexInjectionPlacement; markup: string } {
@@ -48,6 +47,8 @@ function renderRow(row: IndexInjection): { placement: IndexInjectionPlacement; m
 			return { placement: row.placement, markup: `<script>${row.text}</script>` };
 		case "script-src":
 			return { placement: row.placement, markup: `<script src="${row.src}"></script>` };
+		case "script-preload":
+			return { placement: "head", markup: `<link rel="preload" as="script" href="${row.src}">` };
 		case "style":
 			return { placement: "head", markup: `<style>${row.text}</style>` };
 		case "html":
@@ -71,10 +72,12 @@ function splice(html: string, at: number, markup: string): string {
 export function renderIndexInjections(html: string, rows: readonly IndexInjection[]): string {
 	let head = "";
 	let body = "";
+	let bodyEnd = "";
 	for (const row of rows) {
 		const rendered = renderRow(row);
 		if (rendered.placement === "head") head += rendered.markup;
-		else body += rendered.markup;
+		else if (rendered.placement === "body") body += rendered.markup;
+		else bodyEnd += rendered.markup;
 	}
 	let out = html;
 	if (head !== "") {
@@ -85,16 +88,22 @@ export function renderIndexInjections(html: string, rows: readonly IndexInjectio
 		const open = /<body(?:\s[^>]*)?>/i.exec(out);
 		out = open === null ? `${out}${body}` : splice(out, open.index + open[0].length, body);
 	}
+	if (bodyEnd !== "") {
+		const close = /<\/body\s*>/i.exec(out);
+		out = close === null ? `${out}${bodyEnd}` : splice(out, close.index, bodyEnd);
+	}
 	return out;
 }
 
 /**
- * The boot protocol as index injection rows: the inline registration queue
- * precedes blocking classic scripts for modules' and runtime's ordinary
- * `lib/client.js` artifacts, and the graph global follows before the shell
- * reads it.
+ * The boot protocol as index injection rows (dsh 0.2.x): the inline
+ * registration queue precedes the application batches' preload hints and
+ * the bootstrap batch's parser-blocking script; the graph global follows
+ * before the shell reads it, and a body-end script resolves the boot-ready
+ * deferred the client entry awaits.
  * @param graph - the composed entry graph.
- * @returns head rows in execution order: queue script, preload scripts, graph global.
+ * @returns rows in protocol order: queue script, application preloads,
+ * bootstrap script, graph global, boot-ready resolution.
  */
 export function bootInjections(graph: WebBootGraph): IndexInjection[] {
 	const bootstrapId = JSON.stringify(CLIENT_MODULES_ID);
@@ -120,12 +129,17 @@ window.__ModuleLoader__={
   }
 }
 })()`;
-	const preload = PARSER_PRELOAD_IDS.map(id => graph.entries.find(entry => entry.id === id))
-		.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
-		.map((entry): IndexInjection => ({ kind: "script-src", placement: "head", src: entry.url }));
+	const preloads = graph.batches
+		.filter(batch => batch.phase === "application")
+		.map((batch): IndexInjection => ({ kind: "script-preload", src: batch.url }));
+	const bootstrap = graph.batches
+		.filter(batch => batch.phase === "bootstrap")
+		.map((batch): IndexInjection => ({ kind: "script-src", placement: "head", src: batch.url }));
 	return [
 		{ kind: "script", placement: "head", text: queue },
-		...preload,
+		...preloads,
+		...bootstrap,
 		{ kind: "global", name: "__DSH_BOOT__", value: graph },
+		{ kind: "script", placement: "body-end", text: BOOT_READY_SCRIPT },
 	];
 }

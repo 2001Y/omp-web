@@ -78,20 +78,27 @@ function collectFramesObservable(
 }
 
 describe("startWebServer", () => {
-	test("the index carries the boot protocol: queue facade, both preloads, and the graph global", async () => {
+	test("the index carries the boot protocol: queue facade, batch preloads, bootstrap script, graph global, boot-ready", async () => {
 		const { server } = await startFixtureServer();
 		const response = await fetch(server.url);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
 		const html = await response.text();
 		expect(html).toContain("window.__ModuleLoader__");
+		// Bootstrap batch (client-modules only) is the parser-blocking script.
 		expect(html).toMatch(
-			/<script src="\/plugins\/@deepseek-ai\/dsh-client-modules\/client.js\?rev=[0-9a-f]{12}"><\/script>/,
+			/<script src="plugins\/\?\?@deepseek-ai\/dsh-client-modules\/client\.js&rev=[0-9a-f]{12}"><\/script>/,
 		);
+		// The remaining entries ride one application batch, preloaded.
 		expect(html).toMatch(
-			/<script src="\/plugins\/@deepseek-ai\/dsh-client-runtime\/client.js\?rev=[0-9a-f]{12}"><\/script>/,
+			/<link rel="preload" as="script" href="plugins\/\?\?@deepseek-ai\/dsh-client-runtime\/client\.js,@deepseek-ai\/dsh-client-ui-demo\/client\.js&rev=[0-9a-f]{12}">/,
 		);
 		expect(html).toContain('globalThis["__DSH_BOOT__"]');
+		expect(html).toContain('"batches"');
+		// The boot-ready deferred resolves at the end of the body.
+		const ready = html.indexOf("__DSH_BOOT_READY__");
+		expect(ready).toBeGreaterThan(-1);
+		expect(ready).toBeLessThan(html.indexOf("</body>"));
 	});
 
 	test("dist assets serve with their mime type; missing paths 404", async () => {
@@ -111,6 +118,22 @@ describe("startWebServer", () => {
 		const map = await fetch(`${server.url}/plugins/@deepseek-ai/dsh-client-ui-demo/client.js.map`);
 		expect(map.status).toBe(200);
 		expect(await fetch(`${server.url}/plugins/@deepseek-ai/unknown/client.js`)).toHaveProperty("status", 404);
+	});
+
+	test("combo plugin URLs concatenate member bundles in list order; unknown members 404", async () => {
+		const { server } = await startFixtureServer();
+		const combo = await fetch(
+			`${server.url}/plugins/??@deepseek-ai/dsh-client-modules/client.js,@deepseek-ai/dsh-client-ui-demo/client.js&rev=x`,
+		);
+		expect(combo.status).toBe(200);
+		expect(combo.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+		const text = await combo.text();
+		expect(text.indexOf("dsh-client-modules")).toBeGreaterThan(-1);
+		expect(text.indexOf("dsh-client-modules")).toBeLessThan(text.indexOf("dsh-client-ui-demo"));
+		expect(await fetch(`${server.url}/plugins/??@deepseek-ai/unknown/client.js&rev=x`)).toHaveProperty(
+			"status",
+			404,
+		);
 	});
 
 	test("session.list carries the title through the projections block; fileReferences/list dispatches", async () => {
