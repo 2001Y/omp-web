@@ -56,7 +56,8 @@ import { lookup } from "../../config/registry";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { getSkillSlashCommandName } from "../../extensibility/skills";
 import { loadSlashCommands } from "../../extensibility/slash-commands";
-import type { Goal, GoalModeState } from "../../goals/state";
+import type { Goal } from "@oh-my-pi/pi-tui/tools/goal";
+import type { GoalModeState } from "../../goals/state";
 import { cfgGoalContinuationModes, cfgGoalEnabled } from "../../goals/settings";
 import { cfgPlanEnabled } from "../../plan-mode/settings";
 import { resolveLocalUrlToPath } from "../../internal-urls/local-protocol";
@@ -81,12 +82,12 @@ import { createSubagentSettings } from "../../task/executor";
 import { cfgTaskEnableLsp } from "../../task/settings";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "../../tools/todo";
 import { type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
+import type { LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
 import {
 	consumeLoopLimitIteration,
 	createLoopLimitRuntime,
 	describeLoopLimitRuntime,
 	isLoopDurationExpired,
-	type LoopLimitRuntime,
 	parseLoopArgs,
 } from "../loop-limit";
 import { tryRunRpcSkillCommand } from "../rpc/rpc-mode";
@@ -1096,13 +1097,13 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 		// Provider accounts: the OAuth registry plus every provider holding
 		// credentials (some serve API keys, not OAuth).
 		const auth = this.#session.modelRegistry.authStorage;
-		const stored = auth.getAll();
+		const stored = auth.credentials.all();
 		const byId = new Map<string, { id: string; name: string; connected: boolean; credentialCount: number }>();
 		for (const oauth of getOAuthProviders()) {
 			byId.set(oauth.id, {
 				id: oauth.id,
 				name: oauth.name,
-				connected: auth.has(oauth.id),
+				connected: auth.credentials.has(oauth.id),
 				credentialCount: 0,
 			});
 		}
@@ -1126,7 +1127,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 	}
 
 	async logoutProvider(provider: string): Promise<void> {
-		await this.#session.modelRegistry.authStorage.remove(provider);
+		await this.#session.modelRegistry.authStorage.credentials.remove(provider);
 	}
 
 	async setModelRole(role: string, selection?: { model: string; thinking?: string }): Promise<void> {
@@ -2454,7 +2455,7 @@ export class OmpWebDriver implements WebDriver, WebInteractionAsker {
 						});
 						clone = created.session;
 						clone.sessionManager?.appendSessionInit?.({
-							systemPrompt: clone.systemPrompt ? clone.systemPrompt.join("\n\n") : systemPrompt.join("\n\n"),
+							systemPrompt: clone.systemPrompt ?? systemPrompt,
 							task: trimmedWork,
 							tools: clone.getEnabledToolNames(),
 						});

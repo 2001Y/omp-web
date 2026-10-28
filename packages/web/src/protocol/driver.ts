@@ -209,6 +209,7 @@ export type WebHistoryKind =
 	| "modeChange"
 	| "credentialPin"
 	| "ttsrInjection"
+	| "modelUsage"
 	| "resetBoundary"
 	| "sessionInit"
 	| "custom"

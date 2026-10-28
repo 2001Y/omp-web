@@ -319,6 +319,15 @@ export function describeHistoryEntry(
 				toolCallsOnly: false,
 				errorOrAborted: false,
 			};
+		case "model_usage":
+			return {
+				...base,
+				kind: "modelUsage",
+				text: entry.model,
+				bookkeeping: true,
+				toolCallsOnly: false,
+				errorOrAborted: false,
+			};
 		case "reset_boundary":
 			return {
 				...base,

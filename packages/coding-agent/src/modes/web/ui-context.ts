@@ -159,6 +159,11 @@ export class WebExtensionUIContext implements ExtensionUIContext {
 
 	setEditorComponent(_factory: unknown): void {}
 
+	/** No custom editor factory exists in web mode (the composer is the client's own). */
+	getEditorComponent(): undefined {
+		return undefined;
+	}
+
 	custom(): Promise<never> {
 		return Promise.reject(new Error("omp-web: custom components are not supported in web mode"));
 	}
