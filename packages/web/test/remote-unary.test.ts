@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRemoteDispatcher } from "../src/remote/unary";
 import type { ClientRequest } from "../src/remote/wire";
+import type { WebHistoryResult } from "../src/protocol/driver";
 import { fakeDriver } from "./fake-driver";
 
 function request(endpoint: string, args: Record<string, unknown> = {}, rpcId = "r-1"): ClientRequest {
@@ -13,14 +14,14 @@ async function dispatch(driver: ReturnType<typeof fakeDriver>, endpoint: string,
 	return outcome.response;
 }
 
-function historyFixture() {
+function historyFixture(): Map<string, WebHistoryResult> {
 	return new Map([
 		[
 			"s1",
 			{
 				events: [
 					{ type: "turn/start" as const, seq: 0, time: 10, data: { turn: 1 } },
-					{ type: "turn/end" as const, seq: 1, time: 20, data: { turn: 1, reason: "completed" as const } },
+					{ type: "turn/end" as const, seq: 1, time: 20, data: { turn: 1, reason: { kind: "completed" } } },
 				],
 				hasMore: false,
 				title: "Fixture title",

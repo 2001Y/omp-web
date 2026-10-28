@@ -20,16 +20,20 @@ export {
 } from "./boot/graph";
 export type { IndexInjection, IndexInjectionPlacement } from "./boot/inject";
 export { bootInjections, renderIndexInjections } from "./boot/inject";
+export { BrowserAuth, loadOrCreateAuthSecret } from "./remote/auth";
+export type { FollowSnapshot, ProjectionBaseline, SessionSummaryWire } from "./remote/session";
+export { followSnapshot, projectionsBaseline, sessionListValue } from "./remote/session";
+export { RemoteStreams } from "./remote/streams";
+export { createRemoteDispatcher, type UnaryOutcome } from "./remote/unary";
 export type {
 	ClientRequest,
-	ClientResponse,
 	RpcError,
-	RpcReceipt,
 	RpcResult,
-	ServerRequest,
 	ServerResponse,
-} from "./contract/wire";
-export { internalError } from "./contract/wire";
+	StreamClientFrame,
+	StreamHostFrame,
+} from "./remote/wire";
+export { gatewayInternal, remoteError } from "./remote/wire";
 export type {
 	WebCommandDescriptor,
 	WebCommandExecution,

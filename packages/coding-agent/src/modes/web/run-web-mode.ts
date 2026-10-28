@@ -84,7 +84,7 @@ export async function runWebMode(
 			port: 0,
 		});
 	}
-	process.stdout.write(`omp web: ${server.url}\n`);
+	process.stdout.write(`omp web: ${server.accessUrl}\n`);
 	// Park until SIGINT/SIGTERM or an extension-requested shutdown; signal
 	// handlers resolve immediately, the poll covers the extension path.
 	await new Promise<void>(resolve => {

@@ -1,30 +1,23 @@
 /**
- * The omp web GUI host: one Bun.serve assembling the vendored dsh-web browser
- * stack (boot-graph-injected index, plugin bundles, `/api` RPC dispatch, and
- * the two downlink-only WebSocket event streams) over an injected
- * {@link WebDriver}. Pure glue per the omp-web fork rules: no presentation
- * code lives here — every visual byte comes from the vendored client stack.
- *
- * Stream wiring mirrors the dsh connection node half: the mux stream opens
- * with one `session/subscribed` baseline per attached session, then forwards
- * translated session events verbatim; the host stream carries session-added
- * and running-status flips. Client-originated WebSocket messages are a
- * protocol violation (upstream traffic stays on HTTP).
+ * The omp web GUI host (dsh 0.2.x surface): one Bun.serve assembling the
+ * vendored dsh browser stack — boot-graph-injected index behind launch-token
+ * authentication, plugin bundles (single and combo form), the Typert Remote
+ * unary surface (`POST /api/<namespace>/<method>`), the bidirectional
+ * stream mux (`/api/remote.mux`), and the exact fetch routes. Pure glue per
+ * the omp-web fork rules: no presentation code lives here — every visual
+ * byte comes from the vendored client stack.
  */
 
+import * as os from "node:os";
 import * as path from "node:path";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { type ComposedBoot, composeBootGraph } from "../boot/graph";
 import { bootInjections, renderIndexInjections } from "../boot/inject";
-import type { ClientRequest, ClientResponse, RpcReceipt, ServerRequest, ServerResponse } from "../contract/wire";
-import type { WebDriver, WebStreamEvent } from "../protocol/driver";
-import {
-	parseApprovalResponse,
-	parseQuestionResponse,
-	type WebAskOutcome,
-	type WebAskRequest,
-} from "../protocol/interactions";
-import { createRpcDispatcher } from "./rpc";
+import type { WebDriver } from "../protocol/driver";
+import { BrowserAuth, loadOrCreateAuthSecret } from "../remote/auth";
+import { RemoteStreams } from "../remote/streams";
+import { createRemoteDispatcher } from "../remote/unary";
+import { remoteError, type ServerResponse } from "../remote/wire";
 import { serveStatic } from "./static";
 import { isTrustedApiRequest } from "./trust";
 import { buildZip } from "./zip";
@@ -32,17 +25,11 @@ import { buildZip } from "./zip";
 /** Route prefix owning every api request. */
 const API_PATH = "/api";
 
-/** Browser mux-frame WebSocket pathname. */
-const MUX_EVENTS_PATH = `${API_PATH}/events.mux`;
-
-/** Browser host-frame WebSocket pathname. */
-const HOST_EVENTS_PATH = `${API_PATH}/events.host`;
+/** Bidirectional stream mux pathname. */
+const MUX_PATH = `${API_PATH}/remote.mux`;
 
 /** Default listen port (dsh serves 3080; omp takes a neighbor to coexist). */
 const DEFAULT_PORT = 3180;
-
-/** Downlink channel carried on one upgraded WebSocket. */
-type DownlinkChannel = "mux" | "host";
 
 /** Server assembly options. */
 export interface WebServerOptions {
@@ -58,283 +45,25 @@ export interface WebServerOptions {
 	trustedHosts?: string[];
 	/** Browser roster override; defaults to the full dsh web profile roster. */
 	roster?: readonly string[];
+	/** Auth-secret file; defaults to `~/.omp/agent/web-auth.key`. */
+	authSecretPath?: string;
 }
 
 /** Running server handle. */
 export interface WebServerHandle {
-	/** The canonical local URL. */
+	/** The canonical local URL (no credentials). */
 	url: string;
+	/** The first-visit URL carrying the launch token (redeems into a cookie). */
+	accessUrl: string;
 	/** The bound port (the OS-assigned value when zero was requested). */
 	port: number;
 	/** Stops accepting requests, terminates sockets, and resolves. */
 	stop: () => Promise<void>;
 }
 
-/** Per-socket state Bun hands through `server.upgrade`. */
-interface DownlinkState {
-	channel: DownlinkChannel;
-}
-
-/**
- * Downlink fan-out: one WebSocket set over both channels, fed by the driver's
- * stream notifications. A send failure is contained (one broken consumer must
- * not kill the pump).
- */
-class DownlinkHub {
-	private readonly sockets = new Set<Bun.ServerWebSocket<DownlinkState>>();
-
-	add(socket: Bun.ServerWebSocket<DownlinkState>): void {
-		this.sockets.add(socket);
-	}
-
-	remove(socket: Bun.ServerWebSocket<DownlinkState>): void {
-		this.sockets.delete(socket);
-	}
-
-	/**
-	 * Wrap one server-request envelope and broadcast it to one channel's sockets.
-	 * `rpcId` overrides the generated envelope id — answerable asks must reuse
-	 * their ask id so the client's respond echoes it back to `/api/respond`.
-	 */
-	publish(channel: DownlinkChannel, method: string, payload: unknown, rpcId?: string): void {
-		const frame: ServerRequest = { type: "server-request", rpcId: rpcId ?? crypto.randomUUID(), method, payload };
-		const text = JSON.stringify(frame);
-		for (const socket of this.sockets) {
-			if (socket.data.channel !== channel || socket.readyState !== WebSocket.OPEN) continue;
-			try {
-				socket.send(text);
-			} catch (error) {
-				logger.warn(`omp-web: downlink send failure: ${error instanceof Error ? error.message : String(error)}`);
-			}
-		}
-	}
-}
-
-/** One answerable ask parked until its `/api/respond` lands. */
-interface PendingAsk {
-	sessionId: string;
-	rpcId: string;
-	request: WebAskRequest;
-	settle: (outcome: WebAskOutcome) => void;
-	fail: (error: Error) => void;
-}
-
-/**
- * The answerable-ask registry: every driver ask parks here keyed by its rpcId
- * until the browser responds. Mux (re)connection replays every still-pending
- * requested frame verbatim (rpcId reused — the refresh-recovery baseline).
- */
-class PendingInteractions {
-	private readonly pending = new Map<string, PendingAsk>();
-
-	register(ask: PendingAsk): void {
-		this.pending.set(ask.rpcId, ask);
-	}
-
-	/** Resolve one respond payload; unknown or mismatched ids answer not-pending. */
-	respond(rpcId: string, value: unknown): "accepted" | "not-pending" | "bad-response" {
-		const ask = this.pending.get(rpcId);
-		if (ask === undefined) return "not-pending";
-		if (ask.request.kind === "approval") {
-			const parsed = parseApprovalResponse(value);
-			if (parsed === undefined || parsed.approvalId !== ask.request.approval.approvalId) return "bad-response";
-			this.pending.delete(rpcId);
-			ask.settle({ kind: "approval", outcome: parsed.outcome });
-			return "accepted";
-		}
-		const parsed = parseQuestionResponse(value);
-		if (parsed === undefined) return "bad-response";
-		this.pending.delete(rpcId);
-		ask.settle({ kind: "question", answer: parsed.answer });
-		return "accepted";
-	}
-
-	/** Fail one pending ask (the browser declined to answer). */
-	cancel(rpcId: string, reason: string): boolean {
-		const ask = this.pending.get(rpcId);
-		if (ask === undefined) return false;
-		this.pending.delete(rpcId);
-		ask.fail(new Error(reason));
-		return true;
-	}
-
-	/** Fail every pending ask (server shutdown). */
-	failAll(reason: string): void {
-		for (const ask of this.pending.values()) ask.fail(new Error(reason));
-		this.pending.clear();
-	}
-
-	/**
-	 * Fail every pending ask of one session (cancel/rewind/switch settles the
-	 * gate as rejected), returning the failed asks so the caller broadcasts
-	 * their resolved frames — the client drops the panel on that frame, never
-	 * on the failure itself.
-	 */
-	failSession(sessionId: string, reason: string): PendingAsk[] {
-		const failed: PendingAsk[] = [];
-		for (const ask of this.pending.values()) {
-			if (ask.sessionId !== sessionId) continue;
-			this.pending.delete(ask.rpcId);
-			ask.fail(new Error(reason));
-			failed.push(ask);
-		}
-		return failed;
-	}
-
-	/** The requested frames to replay on a fresh mux connection, in ask order. */
-	replayFrames(): Array<{ rpcId: string; method: string; payload: Record<string, unknown> }> {
-		return [...this.pending.values()].map(ask => requestedFrame(ask));
-	}
-}
-
-/** The wire frame one pending ask renders as. */
-function requestedFrame(ask: PendingAsk): {
-	rpcId: string;
-	method: string;
-	payload: Record<string, unknown>;
-} {
-	if (ask.request.kind === "approval") {
-		return {
-			rpcId: ask.rpcId,
-			method: "approval/requested",
-			payload: {
-				type: "approval/requested",
-				sessionId: ask.sessionId,
-				approvalId: ask.request.approval.approvalId,
-				toolName: ask.request.approval.toolName,
-				...(ask.request.approval.reason !== undefined ? { reason: ask.request.approval.reason } : {}),
-			},
-		};
-	}
-	return {
-		rpcId: ask.rpcId,
-		method: "question/requested",
-		payload: { type: "question/requested", sessionId: ask.sessionId, questions: ask.request.questions },
-	};
-}
-
-/** Fold one driver stream notification onto its wire frame. */
-function publishStreamEvent(hub: DownlinkHub, pending: PendingInteractions, notification: WebStreamEvent): void {
-	switch (notification.kind) {
-		case "session-event":
-			hub.publish("mux", "session/event", {
-				type: "session/event",
-				sessionId: notification.sessionId,
-				event: notification.event,
-			});
-			break;
-		case "session-projection":
-			hub.publish("mux", "session/projection", {
-				type: "session/projection",
-				sessionId: notification.sessionId,
-				key: notification.key,
-				value: notification.value,
-				seq: notification.seq,
-			});
-			break;
-		case "session-added":
-			hub.publish("host", "host/session-added", {
-				type: "host/session-added",
-				sessionId: notification.sessionId,
-				blank: notification.blank,
-				...(notification.cwd !== undefined ? { cwd: notification.cwd } : {}),
-			});
-			break;
-		case "session-status":
-			hub.publish("host", "host/session-status", {
-				type: "host/session-status",
-				sessionId: notification.sessionId,
-				running: notification.running,
-			});
-			break;
-		case "session-jobs":
-			hub.publish("mux", "session/jobs", {
-				type: "session/jobs",
-				sessionId: notification.sessionId,
-				jobs: notification.jobs,
-			});
-			break;
-		case "session-queue":
-			hub.publish("mux", "session/queue", {
-				type: "session/queue",
-				sessionId: notification.sessionId,
-				items: notification.items,
-			});
-			break;
-		case "session-attached": {
-			// Mirror the mux-open baseline: the subscribed frame is the client's
-			// re-baseline anchor (queue mirror reset + projection truncation),
-			// and a non-empty queue snapshot follows it on the same stream.
-			hub.publish("mux", "session/subscribed", {
-				type: "session/subscribed",
-				sessionId: notification.sessionId,
-				lastSeq: notification.lastSeq,
-			});
-			if (notification.queue.length > 0) {
-				hub.publish("mux", "session/queue", {
-					type: "session/queue",
-					sessionId: notification.sessionId,
-					items: notification.queue,
-				});
-			}
-			if (notification.jobs !== undefined && notification.jobs.length > 0) {
-				hub.publish("mux", "session/jobs", {
-					type: "session/jobs",
-					sessionId: notification.sessionId,
-					jobs: notification.jobs,
-				});
-			}
-			break;
-		}
-		case "commands-changed":
-			// The client's command directory listens through remote.$on and
-			// repulls every session key on this signal.
-			hub.publish("mux", "commands/change", {});
-			break;
-		case "cancel-asks": {
-			// The turn carrying these asks is unwinding (cancel/rewind/switch):
-			// settle each parked gate promise, then drop the client panel with
-			// the resolved counterpart frame (rejected / cancelled).
-			for (const ask of pending.failSession(notification.sessionId, notification.reason)) {
-				if (ask.request.kind === "approval") {
-					hub.publish("mux", "approval/resolved", {
-						type: "approval/resolved",
-						sessionId: ask.sessionId,
-						approvalId: ask.request.approval.approvalId,
-						outcome: "rejected",
-					});
-				} else {
-					hub.publish("mux", "question/resolved", {
-						type: "question/resolved",
-						sessionId: ask.sessionId,
-						questionRpcId: ask.rpcId,
-						outcome: "cancelled",
-					});
-				}
-			}
-			break;
-		}
-		case "ask-requested": {
-			pending.register({
-				sessionId: notification.sessionId,
-				rpcId: notification.rpcId,
-				request: notification.request,
-				settle: notification.settle,
-				fail: notification.fail,
-			});
-			const frame = requestedFrame({
-				sessionId: notification.sessionId,
-				rpcId: notification.rpcId,
-				request: notification.request,
-				settle: notification.settle,
-				fail: notification.fail,
-			});
-			// The envelope id must equal the ask id: the client's respond echoes
-			// the envelope rpcId, which `/api/respond` maps back onto this ask.
-			hub.publish("mux", frame.method, frame.payload, frame.rpcId);
-			break;
-		}
-	}
+/** Per-socket state Bun hands through `server.upgrade` (the mux carries none). */
+interface MuxSocketData {
+	kind: "remote-mux";
 }
 
 /** Compose the boot graph and pre-render the index once per server lifetime. */
@@ -352,13 +81,6 @@ async function prepareBootAssets(
 	return { boot, indexHtml: renderIndexInjections(rawIndex, bootInjections(boot.graph)) };
 }
 
-/** Whether the pathname names one of the two downlink streams. */
-function downlinkChannelOf(pathname: string): DownlinkChannel | undefined {
-	if (pathname === MUX_EVENTS_PATH) return "mux";
-	if (pathname === HOST_EVENTS_PATH) return "host";
-	return undefined;
-}
-
 /**
  * Start the web GUI host.
  * @param options - assembly options; `driver` and `dshRoot` are required.
@@ -369,24 +91,27 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	const port = options.port ?? DEFAULT_PORT;
 	const trustedHosts = options.trustedHosts ?? [];
 	const { boot, indexHtml } = await prepareBootAssets(options.dshRoot, options.roster);
-	const dispatch = createRpcDispatcher(options.driver);
+	const secretPath = options.authSecretPath ?? path.join(os.homedir(), ".omp", "agent", "web-auth.key");
+	const auth = new BrowserAuth(await loadOrCreateAuthSecret(secretPath));
+	const dispatcher = createRemoteDispatcher(options.driver);
+	const streams = new RemoteStreams(options.driver);
 	const distRoot = path.join(options.dshRoot, "apps", "web", "dist");
 	const distIndex = path.join(distRoot, "index.html");
-	const hub = new DownlinkHub();
-	const pending = new PendingInteractions();
 
 	const unsubscribe = options.driver.subscribe(notification => {
 		try {
-			publishStreamEvent(hub, pending, notification);
+			streams.handleNotification(notification);
 		} catch (error) {
 			logger.warn(`omp-web: stream pump failure: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	});
 
-	const server = Bun.serve<DownlinkState>({
+	const liveness = setInterval(() => streams.sweepLiveness(), 2000);
+
+	const server = Bun.serve<MuxSocketData>({
 		hostname,
 		port,
-		fetch: async (req: Request, srv: Bun.Server<DownlinkState>): Promise<Response | undefined> => {
+		fetch: async (req: Request, srv: Bun.Server<MuxSocketData>): Promise<Response | undefined> => {
 			try {
 				return await handleRequest(req, srv);
 			} catch (error) {
@@ -396,99 +121,123 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			}
 		},
 		websocket: {
-			open: (ws: Bun.ServerWebSocket<DownlinkState>): void => {
-				hub.add(ws);
-				if (ws.data.channel !== "mux") return;
-				// Mux baseline: one subscribed control frame per attached session
-				// (the refresh-recovery anchor for its event stream).
-				void options.driver
-					.attachedSessions()
-					.then(async attached => {
-						for (const { sessionId, lastSeq } of attached) {
-							hub.publish("mux", "session/subscribed", {
-								type: "session/subscribed",
-								sessionId,
-								lastSeq,
-							});
-							// The queue snapshot follows its subscribed frame on the
-							// same stream (the client clears its stale mirror there).
-							const items = await options.driver.queuedMessages(sessionId);
-							if (items.length > 0) {
-								hub.publish("mux", "session/queue", {
-									type: "session/queue",
-									sessionId,
-									items,
-								});
-							}
-							// Same re-baseline rule for the job mirror.
-							const jobs = await options.driver.sessionJobs(sessionId);
-							if (jobs.length > 0) {
-								hub.publish("mux", "session/jobs", {
-									type: "session/jobs",
-									sessionId,
-									jobs,
-								});
-							}
-						}
-						// Refresh-recovery baseline: still-pending asks replay verbatim.
-						for (const frame of pending.replayFrames()) {
-							hub.publish("mux", frame.method, frame.payload, frame.rpcId);
-						}
-					})
-					.catch(error => {
-						logger.warn(
-							`omp-web: mux baseline failure: ${error instanceof Error ? error.message : String(error)}`,
-						);
-					});
+			open: (ws: Bun.ServerWebSocket<MuxSocketData>): void => {
+				streams.attach(ws);
 			},
-			// Client messages are a protocol violation: upstream traffic stays on HTTP.
-			message: (ws: Bun.ServerWebSocket<DownlinkState>): void => {
-				ws.close(1008, "downlink only");
+			message: (ws: Bun.ServerWebSocket<MuxSocketData>, message: string | Buffer): void => {
+				if (typeof message !== "string") {
+					ws.close(1003, "text frames only");
+					return;
+				}
+				void streams.handleMessage(ws, message);
 			},
-			close: (ws: Bun.ServerWebSocket<DownlinkState>): void => {
-				hub.remove(ws);
+			pong: (ws: Bun.ServerWebSocket<MuxSocketData>): void => {
+				streams.noteAlive(ws);
+			},
+			close: (ws: Bun.ServerWebSocket<MuxSocketData>): void => {
+				streams.detach(ws);
 			},
 		},
 	});
 
-	async function handleRequest(req: Request, server: Bun.Server<DownlinkState>): Promise<Response | undefined> {
-		const rawPathname = new URL(req.url).pathname;
+	const url = `http://${hostname}:${String(server.port)}`;
+	return {
+		url,
+		accessUrl: `${url}/?token=${auth.launchToken}`,
+		port: server.port ?? port,
+		stop: async (): Promise<void> => {
+			clearInterval(liveness);
+			unsubscribe();
+			streams.failAllAsks("omp-web: server stopped");
+			server.stop(true);
+		},
+	};
+
+	async function handleRequest(req: Request, srv: Bun.Server<MuxSocketData>): Promise<Response | undefined> {
+		const requestUrl = new URL(req.url);
+		const rawPathname = requestUrl.pathname;
+		if (rawPathname === "/connect") return handleConnect(req, requestUrl);
 		if (rawPathname === API_PATH || rawPathname.startsWith(`${API_PATH}/`)) {
-			return handleApi(req, server, rawPathname);
+			return handleApi(req, srv, rawPathname);
+		}
+		if (rawPathname === "/" || rawPathname === "/index.html") return handleIndex(req, requestUrl);
+		if (auth.authenticate(req.headers) === undefined) {
+			return new Response("unauthorized", { status: 401 });
 		}
 		if (rawPathname.startsWith("/plugins/")) {
-			return handlePluginBundle(req, new URL(req.url));
+			return handlePluginBundle(req, requestUrl);
 		}
 		return serveStatic(decodeURIComponent(rawPathname), req.method, distRoot, distIndex, async () => indexHtml);
 	}
 
+	/** `GET /`: redeem a launch token into the signed cookie, else require the cookie. */
+	function handleIndex(req: Request, requestUrl: URL): Response {
+		const authority = req.headers.get("host") ?? "";
+		const token = requestUrl.searchParams.get("token");
+		if (auth.isLaunchToken(token)) {
+			return new Response(null, {
+				status: 303,
+				headers: { location: "/", "set-cookie": auth.mintCookie(authority, 1) },
+			});
+		}
+		if (auth.authenticate(req.headers) === undefined) {
+			return new Response("unauthorized", { status: 401 });
+		}
+		return new Response(indexHtml, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+	}
+
+	/** `GET /connect?token=…&interactions=…`: the v2 cookie for worker peers. */
+	function handleConnect(req: Request, requestUrl: URL): Response {
+		const authority = req.headers.get("host") ?? "";
+		const token = requestUrl.searchParams.get("token");
+		if (auth.isLaunchToken(token)) {
+			return new Response(null, {
+				status: 303,
+				headers: { location: "/", "set-cookie": auth.mintCookie(authority, 2, crypto.randomUUID()) },
+			});
+		}
+		if (auth.authenticate(req.headers) !== undefined) {
+			return new Response(null, { status: 303, headers: { location: "/" } });
+		}
+		return new Response("unauthorized", { status: 401 });
+	}
+
 	async function handleApi(
 		req: Request,
-		server: Bun.Server<DownlinkState>,
+		srv: Bun.Server<MuxSocketData>,
 		rawPathname: string,
 	): Promise<Response | undefined> {
 		if (!isTrustedApiRequest(req.headers, trustedHosts)) {
 			return new Response("forbidden", { status: 403 });
 		}
+		if (auth.authenticate(req.headers) === undefined) {
+			return new Response("unauthorized", { status: 401 });
+		}
 		if (rawPathname === `${API_PATH}/session.export`) {
 			return handleSessionExport(req);
 		}
-		const channel = downlinkChannelOf(rawPathname);
-		if (channel !== undefined) {
-			if (req.method !== "GET") {
-				return new Response(null, { status: 405 });
-			}
+		if (rawPathname === `${API_PATH}/session/uploadFileBinary` || rawPathname === `${API_PATH}/file`) {
+			// Exact fetch routes this phase does not serve: an honest 404 lets
+			// the client fold the feature instead of breaking on an envelope.
+			return new Response(null, { status: 404 });
+		}
+		if (rawPathname === MUX_PATH) {
+			if (req.method !== "GET") return new Response(null, { status: 405 });
 			if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
 				return new Response("upgrade required", {
 					status: 426,
 					headers: { connection: "Upgrade", upgrade: "websocket" },
 				});
 			}
-			if (server.upgrade(req, { data: { channel } })) return undefined;
+			if (srv.upgrade(req, { data: { kind: "remote-mux" } })) return undefined;
 			return new Response("upgrade failed", { status: 400 });
 		}
 		if (req.method !== "POST") {
 			return new Response(null, { status: 405 });
+		}
+		const mediaType = req.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+		if (mediaType !== "application/json") {
+			return new Response(null, { status: 415 });
 		}
 		let body: unknown;
 		try {
@@ -496,20 +245,30 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		} catch {
 			return new Response(null, { status: 400 });
 		}
-		if (rawPathname === `${API_PATH}/respond`) {
-			return Response.json(respondReceipt(body, pending, hub));
-		}
-		if (typeof body !== "object" || body === null || (body as ClientRequest).type !== "client-request") {
+		if (typeof body !== "object" || body === null || (body as { type?: unknown }).type !== "client-request") {
 			return new Response(null, { status: 400 });
 		}
-		const request = body as ClientRequest;
-		const method = rawPathname.slice(API_PATH.length + 1);
-		const response: ServerResponse = {
-			type: "server-response",
+		const request = body as { rpcId: string; method: string; payload: { args: Record<string, unknown> } };
+		const endpoint = rawPathname.slice(API_PATH.length + 1);
+		if (endpoint === "$events/result") {
+			const accepted = streams.resolveEventResult(request.payload?.args ?? {});
+			const response: ServerResponse = {
+				type: "server-response",
+				rpcId: request.rpcId,
+				result: accepted
+					? { ok: true, value: { accepted: true } }
+					: { ok: false, error: remoteError("gateway/not-found", "omp-web: no pending ask for that event") },
+			};
+			return Response.json(response);
+		}
+		const outcome = await dispatcher.dispatch(endpoint, {
+			type: "client-request",
 			rpcId: request.rpcId,
-			result: await dispatch(method, request.payload),
-		};
-		return Response.json(response);
+			method: request.method,
+			payload: request.payload,
+		});
+		if (outcome.status === 404) return new Response(null, { status: 404 });
+		return Response.json(outcome.response);
 	}
 
 	/**
@@ -536,48 +295,6 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			"content-length": String(zip.length),
 		};
 		return new Response(req.method === "HEAD" ? null : zip, { status: 200, headers });
-	}
-
-	/** Fold a `/api/respond` POST into the carrier receipt, resolving the parked ask. */
-	function respondReceipt(body: unknown, pending: PendingInteractions, hub: DownlinkHub): RpcReceipt {
-		if (typeof body !== "object" || body === null || (body as ClientResponse).type !== "client-response") {
-			return { accepted: false, reason: "bad-response" };
-		}
-		const response = body as ClientResponse;
-		if (!response.result.ok) {
-			// The browser declined to answer: fail the ask so the driver promise settles.
-			pending.cancel(response.rpcId, `client declined: ${response.result.error.message}`);
-			return { accepted: true };
-		}
-		// Peek the pending kind first so the resolved frame carries the right shape.
-		const outcome = pending.respond(response.rpcId, response.result.value);
-		if (outcome === "not-pending") return { accepted: false, reason: "not-pending" };
-		if (outcome === "bad-response") return { accepted: false, reason: "bad-response" };
-		publishResolvedFrame(hub, response.rpcId, response.result.value);
-		return { accepted: true };
-	}
-
-	/** Broadcast the resolved counterpart frame for one settled ask. */
-	function publishResolvedFrame(hub: DownlinkHub, rpcId: string, value: unknown): void {
-		const approval = parseApprovalResponse(value);
-		if (approval !== undefined) {
-			hub.publish("mux", "approval/resolved", {
-				type: "approval/resolved",
-				sessionId: approval.sessionId,
-				approvalId: approval.approvalId,
-				outcome: approval.outcome,
-			});
-			return;
-		}
-		const question = parseQuestionResponse(value);
-		if (question !== undefined) {
-			hub.publish("mux", "question/resolved", {
-				type: "question/resolved",
-				sessionId: question.sessionId,
-				questionRpcId: rpcId,
-				outcome: "answered",
-			});
-		}
 	}
 
 	async function handlePluginBundle(req: Request, url: URL): Promise<Response> {
@@ -640,16 +357,4 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			},
 		});
 	}
-
-	const boundPort = server.port ?? port;
-	const url = `http://${hostname}:${boundPort}`;
-	return {
-		url,
-		port: boundPort,
-		stop: async () => {
-			unsubscribe();
-			pending.failAll("omp-web: server stopped");
-			server.stop(true);
-		},
-	};
 }

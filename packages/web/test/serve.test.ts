@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { startWebServer, type WebServerHandle } from "../src/server/serve";
+import type { WebHistoryResult, WebStreamEvent } from "../src/protocol/driver";
 import { fakeDriver } from "./fake-driver";
 import { buildFixtureTree, type FixtureTree } from "./helpers";
 
@@ -13,7 +14,7 @@ afterEach(async () => {
 
 async function startFixtureServer(
 	overrides: Parameters<typeof fakeDriver>[0] = {},
-): Promise<{ server: WebServerHandle; driver: ReturnType<typeof fakeDriver> }> {
+): Promise<{ server: WebServerHandle; driver: ReturnType<typeof fakeDriver>; cookie: string }> {
 	const tree = await buildFixtureTree([
 		{ id: "@deepseek-ai/dsh-client-modules" },
 		{ id: "@deepseek-ai/dsh-client-runtime" },
@@ -26,620 +27,275 @@ async function startFixtureServer(
 		"@deepseek-ai/dsh-client-ui-demo",
 	];
 	const driver = fakeDriver(overrides);
-	const server = await startWebServer({ driver, dshRoot: tree.root, port: 0, roster });
-	SERVERS.push(server);
-	return { server, driver };
-}
-
-function rpcBody(rpcId: string, method: string, payload: unknown): string {
-	return JSON.stringify({ type: "client-request", rpcId, method, payload });
-}
-
-/** Collect text frames from one downlink WebSocket until the wanted count or timeout. */
-function collectFrames(url: string, count: number, timeoutMs: number): Promise<unknown[]> {
-	return collectFramesObservable(url, count, timeoutMs).frames;
-}
-
-/**
- * Frame collector with an awaitable open signal: the server publishes only to
- * connected sockets, so tests must emit strictly after the handshake.
- */
-function collectFramesObservable(
-	url: string,
-	count: number,
-	timeoutMs: number,
-): { frames: Promise<unknown[]>; opened: Promise<void> } {
-	let openedResolve: () => void;
-	const opened = new Promise<void>(resolve => {
-		openedResolve = resolve;
+	const server = await startWebServer({
+		driver,
+		dshRoot: tree.root,
+		port: 0,
+		roster,
+		authSecretPath: `${tree.root}/auth.key`,
 	});
-	const frames = new Promise<unknown[]>((resolve, reject) => {
-		const collected: unknown[] = [];
-		const socket = new WebSocket(url);
-		const timer = setTimeout(() => {
-			socket.close();
-			reject(new Error(`collected only ${String(collected.length)} of ${String(count)} frames`));
-		}, timeoutMs);
-		socket.onopen = () => openedResolve();
-		socket.onmessage = event => {
-			collected.push(JSON.parse(event.data as string));
-			if (collected.length >= count) {
-				clearTimeout(timer);
-				socket.close();
-				resolve(collected);
+	SERVERS.push(server);
+	const redemption = await fetch(server.accessUrl, { redirect: "manual" });
+	expect(redemption.status).toBe(303);
+	const setCookie = redemption.headers.get("set-cookie") ?? "";
+	expect(setCookie).toContain("dsh-auth-");
+	const cookie = setCookie.split(";", 1)[0] ?? "";
+	return { server, driver, cookie };
+}
+
+function rpcBody(rpcId: string, method: string, args: Record<string, unknown>): string {
+	return JSON.stringify({ type: "client-request", rpcId, method, payload: { args } });
+}
+
+async function postApi(
+	server: WebServerHandle,
+	cookie: string,
+	endpoint: string,
+	args: Record<string, unknown> = {},
+): Promise<{ status: number; body: { result?: { ok: boolean; value?: unknown; error?: { code: string } } } }> {
+	const response = await fetch(`${server.url}/api/${endpoint}`, {
+		method: "POST",
+		headers: { cookie, "content-type": "application/json" },
+		body: rpcBody("rpc-1", endpoint, args),
+	});
+	return { status: response.status, body: (await response.json()) as never };
+}
+
+function emit(driver: ReturnType<typeof fakeDriver>, notification: WebStreamEvent): void {
+	for (const listener of driver.state.listeners) listener(notification);
+}
+
+/** One mux client: collects frames, answers stream opens, and resolves waiters by predicate. */
+class MuxClient {
+	readonly frames: Array<Record<string, unknown>> = [];
+	readonly #waiters: Array<{ match: (frame: Record<string, unknown>) => boolean; resolve: (frame: Record<string, unknown>) => void }> = [];
+	readonly #socket: WebSocket;
+
+	constructor(url: string, cookie: string) {
+		this.#socket = new WebSocket(url, { headers: { cookie } } as never);
+		this.#socket.onmessage = event => {
+			const frame = JSON.parse(event.data as string) as Record<string, unknown>;
+			this.frames.push(frame);
+			for (let i = this.#waiters.length - 1; i >= 0; i--) {
+				const waiter = this.#waiters[i];
+				if (waiter !== undefined && waiter.match(frame)) {
+					this.#waiters.splice(i, 1);
+					waiter.resolve(frame);
+				}
 			}
 		};
-		socket.onerror = () => {
-			clearTimeout(timer);
-			reject(new Error("websocket error"));
-		};
-	});
-	return { frames, opened };
+	}
+
+	async opened(): Promise<void> {
+		if (this.#socket.readyState === WebSocket.OPEN) return;
+		await new Promise<void>((resolve, reject) => {
+			this.#socket.onopen = () => resolve();
+			this.#socket.onerror = () => reject(new Error("mux socket error"));
+		});
+	}
+
+	send(frame: Record<string, unknown>): void {
+		this.#socket.send(JSON.stringify(frame));
+	}
+
+	openStream(streamId: string, endpoint: string, args: Record<string, unknown> = {}): void {
+		this.send({ type: "open", streamId, endpoint, payload: { args } });
+	}
+
+	waitFor(match: (frame: Record<string, unknown>) => boolean, timeoutMs = 3000): Promise<Record<string, unknown>> {
+		const existing = this.frames.find(match);
+		if (existing !== undefined) return Promise.resolve(existing);
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("mux frame timeout")), timeoutMs);
+			this.#waiters.push({
+				match,
+				resolve: frame => {
+					clearTimeout(timer);
+					resolve(frame);
+				},
+			});
+		});
+	}
+
+	close(): void {
+		this.#socket.close();
+	}
 }
 
-describe("startWebServer", () => {
-	test("the index carries the boot protocol: queue facade, batch preloads, bootstrap script, graph global, boot-ready", async () => {
-		const { server } = await startFixtureServer();
-		const response = await fetch(server.url);
+describe("startWebServer (0.2.x surface)", () => {
+	test("the index requires auth; the launch token redeems into the signed cookie", async () => {
+		const { server, cookie } = await startFixtureServer();
+		expect((await fetch(server.url)).status).toBe(401);
+		const response = await fetch(server.url, { headers: { cookie } });
 		expect(response.status).toBe(200);
-		expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
 		const html = await response.text();
 		expect(html).toContain("window.__ModuleLoader__");
-		// Bootstrap batch (client-modules only) is the parser-blocking script.
 		expect(html).toMatch(
 			/<script src="plugins\/\?\?@deepseek-ai\/dsh-client-modules\/client\.js&rev=[0-9a-f]{12}"><\/script>/,
 		);
-		// The remaining entries ride one application batch, preloaded.
-		expect(html).toMatch(
-			/<link rel="preload" as="script" href="plugins\/\?\?@deepseek-ai\/dsh-client-runtime\/client\.js,@deepseek-ai\/dsh-client-ui-demo\/client\.js&rev=[0-9a-f]{12}">/,
-		);
-		expect(html).toContain('globalThis["__DSH_BOOT__"]');
 		expect(html).toContain('"batches"');
-		// The boot-ready deferred resolves at the end of the body.
 		const ready = html.indexOf("__DSH_BOOT_READY__");
 		expect(ready).toBeGreaterThan(-1);
 		expect(ready).toBeLessThan(html.indexOf("</body>"));
 	});
 
-	test("dist assets serve with their mime type; missing paths 404", async () => {
-		const { server } = await startFixtureServer();
-		const asset = await fetch(`${server.url}/assets/index-fixture.js`);
-		expect(asset.status).toBe(200);
-		expect(asset.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-		expect(await fetch(`${server.url}/assets/absent.css`)).toHaveProperty("status", 404);
-	});
-
-	test("plugin bundles and their maps serve from the composed table", async () => {
-		const { server } = await startFixtureServer();
-		const bundle = await fetch(`${server.url}/plugins/@deepseek-ai/dsh-client-ui-demo/client.js?rev=x`);
+	test("plugin bundles serve single and combo forms behind auth", async () => {
+		const { server, cookie } = await startFixtureServer();
+		expect((await fetch(`${server.url}/plugins/@deepseek-ai/dsh-client-ui-demo/client.js`)).status).toBe(401);
+		const bundle = await fetch(`${server.url}/plugins/@deepseek-ai/dsh-client-ui-demo/client.js?rev=x`, {
+			headers: { cookie },
+		});
 		expect(bundle.status).toBe(200);
-		expect(bundle.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
 		expect(await bundle.text()).toContain("dsh-client-ui-demo");
-		const map = await fetch(`${server.url}/plugins/@deepseek-ai/dsh-client-ui-demo/client.js.map`);
-		expect(map.status).toBe(200);
-		expect(await fetch(`${server.url}/plugins/@deepseek-ai/unknown/client.js`)).toHaveProperty("status", 404);
-	});
-
-	test("combo plugin URLs concatenate member bundles in list order; unknown members 404", async () => {
-		const { server } = await startFixtureServer();
 		const combo = await fetch(
 			`${server.url}/plugins/??@deepseek-ai/dsh-client-modules/client.js,@deepseek-ai/dsh-client-ui-demo/client.js&rev=x`,
+			{ headers: { cookie } },
 		);
 		expect(combo.status).toBe(200);
-		expect(combo.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
 		const text = await combo.text();
-		expect(text.indexOf("dsh-client-modules")).toBeGreaterThan(-1);
 		expect(text.indexOf("dsh-client-modules")).toBeLessThan(text.indexOf("dsh-client-ui-demo"));
-		expect(await fetch(`${server.url}/plugins/??@deepseek-ai/unknown/client.js&rev=x`)).toHaveProperty(
-			"status",
-			404,
-		);
 	});
 
-	test("session.list carries the title through the projections block; fileReferences/list dispatches", async () => {
-		const { server, driver } = await startFixtureServer({
-			sessions: [
-				{ sessionId: "s1", updatedAt: 1, running: false, blank: false, cwd: "/tmp/project", title: "会话标题" },
-			],
-		});
-		const list = await fetch(`${server.url}/api/session.list`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("t-1", "session.list", {}),
-		});
-		const value = ((await list.json()) as { result: { value: { items: unknown[] } } }).result.value;
-		expect(value.items[0]).toMatchObject({
+	test("unary calls route by endpoint; envelope and claim discipline hold", async () => {
+		const { server, driver, cookie } = await startFixtureServer();
+		const list = await postApi(server, cookie, "session/list");
+		expect(list.status).toBe(200);
+		expect(list.body.result).toMatchObject({ ok: true });
+		const prompt = await postApi(server, cookie, "session/prompt", {
+			requestId: "req-1",
 			sessionId: "s1",
-			projections: { asOfSeq: 0, values: { title: "会话标题" } },
+			mode: "queue",
+			content: [{ type: "text", text: "hello" }],
 		});
-		const patched = driver as unknown as {
-			listFileReferences: (sessionId: string, query: string) => Promise<unknown[]>;
-		};
-		patched.listFileReferences = async (_sessionId, query) => [{ path: query, kind: "file" }];
-		const refs = await fetch(`${server.url}/api/fileReferences/list`, {
+		expect(prompt.body.result).toEqual({ ok: true, value: { accepted: true } });
+		expect(driver.state.prompts).toEqual([{ sessionId: "s1", text: "hello" }]);
+		const unimplemented = await postApi(server, cookie, "terminal/list", { sessionId: "s1" });
+		expect(unimplemented.body.result).toMatchObject({ ok: false, error: { code: "gateway/service-unavailable" } });
+		const unclaimed = await fetch(`${server.url}/api/nope/nope`, {
+			method: "POST",
+			headers: { cookie, "content-type": "application/json" },
+			body: rpcBody("rpc-2", "nope/nope", {}),
+		});
+		expect(unclaimed.status).toBe(404);
+		const wrongType = await fetch(`${server.url}/api/session/list`, {
+			method: "POST",
+			headers: { cookie, "content-type": "text/plain" },
+			body: "x",
+		});
+		expect(wrongType.status).toBe(415);
+		const unauthenticated = await fetch(`${server.url}/api/session/list`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: rpcBody("t-2", "fileReferences/list", { args: { agentId: "s1", query: "pack" } }),
+			body: rpcBody("rpc-3", "session/list", {}),
 		});
-		expect(((await refs.json()) as { result: { ok: boolean; value: unknown[] } }).result).toEqual({
-			ok: true,
-			value: [{ path: "pack", kind: "file" }],
-		});
+		expect(unauthenticated.status).toBe(401);
 	});
 
-	test("POST /api/host.describe echoes the request rpcId with the driver snapshot", async () => {
-		const { server } = await startFixtureServer();
-		const response = await fetch(`${server.url}/api/host.describe`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("rpc-1", "host.describe", {}),
-		});
+	test("GET /api/session.export serves the session log zip behind auth", async () => {
+		const { server, cookie } = await startFixtureServer();
+		expect((await fetch(`${server.url}/api/session.export?sessionId=s1`)).status).toBe(401);
+		const response = await fetch(`${server.url}/api/session.export?sessionId=s1`, { headers: { cookie } });
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({
-			type: "server-response",
-			rpcId: "rpc-1",
-			result: {
-				ok: true,
-				value: {
-					version: "18.0.4-test",
-					cwd: "/tmp/project",
-					home: "/home/user",
-					attachedSessions: 1,
-					canOpenPath: false,
+		expect(response.headers.get("content-type")).toBe("application/zip");
+	});
+
+	test("the mux opens $events with the ready marker, then control baseline and follow snapshot", async () => {
+		const history: Map<string, WebHistoryResult> = new Map([
+			[
+				"s1",
+				{
+					events: [
+						{ type: "turn/start" as const, seq: 0, time: 10, data: { turn: 1 } },
+						{ type: "turn/end" as const, seq: 1, time: 20, data: { turn: 1, reason: { kind: "completed" } } },
+					],
+					hasMore: false,
+					title: "Fixture title",
 				},
-			},
-		});
-	});
-
-	test("settings.describe serves the document facts and openDocument reaches the driver", async () => {
-		const { server, driver } = await startFixtureServer();
-		const describe = await fetch(`${server.url}/api/settings.describe`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("s-1", "settings.describe", {}),
-		});
-		expect(((await describe.json()) as { result: { ok: boolean; value: unknown } }).result).toEqual({
-			ok: true,
-			value: { writable: false, hasDocument: true, namespaces: [] },
-		});
-		const open = await fetch(`${server.url}/api/settings.openDocument`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("s-2", "settings.openDocument", {}),
-		});
-		expect(((await open.json()) as { result: { ok: boolean; value: unknown } }).result).toEqual({
-			ok: true,
-			value: { opened: true },
-		});
-		expect(driver.state.documentOpens).toEqual([true]);
-	});
-
-	test("subagent.list shapes the catalog rows over the driver entries", async () => {
-		const { server, driver } = await startFixtureServer();
-		const patched = driver as unknown as {
-			listSubagents: (parent: string) => Promise<{
-				entries: Array<{
-					id: string;
-					mode: "one-shot" | "continuable";
-					activity: "running" | "inactive";
-					hasChildren: boolean;
-					label?: string;
-				}>;
-				parentAvailable: boolean;
-			}>;
-		};
-		patched.listSubagents = async () => ({
-			entries: [
-				{ id: "child-1", mode: "continuable", activity: "running", hasChildren: false, label: "Researcher" },
 			],
-			parentAvailable: true,
+		]);
+		const { server, driver, cookie } = await startFixtureServer({ history });
+		const mux = new MuxClient(`${server.url.replace("http", "ws")}/api/remote.mux`, cookie);
+		await mux.opened();
+		mux.openStream("ev", "$events");
+		const ready = await mux.waitFor(frame => frame.streamId === "ev");
+		expect(ready.value).toMatchObject({ type: "ready", host: { home: "/home/user" } });
+		const clientId = (ready.value as { clientId: string }).clientId;
+		expect(typeof clientId).toBe("string");
+
+		mux.openStream("ctl", "session/control");
+		const baseline = await mux.waitFor(frame => frame.streamId === "ctl");
+		expect(baseline.value).toMatchObject({ type: "baseline" });
+
+		mux.openStream("fol", "session/follow", {
+			address: { kind: "session", sessionId: "s1" },
+			assistantStream: true,
 		});
-		const response = await fetch(`${server.url}/api/subagent.list`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("sub-1", "subagent.list", { parentSessionId: "s1" }),
+		const snapshot = await mux.waitFor(frame => frame.streamId === "fol");
+		expect(snapshot.value).toMatchObject({ type: "snapshot", cursor: 1, assistantStream: { revision: 0 } });
+
+		// The next journal event streams onto the follow; a gap ends it with an error.
+		emit(driver, {
+			kind: "session-event",
+			sessionId: "s1",
+			event: { type: "turn/start", seq: 2, time: 30, data: { turn: 2 } },
 		});
-		expect(((await response.json()) as { result: { ok: boolean; value: unknown } }).result).toEqual({
-			ok: true,
-			value: {
-				parentAvailable: true,
-				entries: [
-					{
-						kind: "child",
-						id: "child-1",
-						activity: "running",
-						hasChildren: false,
-						mode: "continuable",
-						label: "Researcher",
-					},
-				],
+		const streamed = await mux.waitFor(
+			frame => frame.streamId === "fol" && (frame.value as { type?: string })?.type === "event",
+		);
+		expect(streamed.value).toMatchObject({ event: { seq: 2 } });
+		emit(driver, {
+			kind: "session-event",
+			sessionId: "s1",
+			event: { type: "turn/start", seq: 4, time: 40, data: { turn: 3 } },
+		});
+		const gap = await mux.waitFor(frame => frame.streamId === "fol" && frame.type === "error");
+		expect(gap.error).toMatchObject({ code: "session/event-gap" });
+		mux.close();
+	});
+
+	test("an approval ask rides the $events waterfall and settles through $events/result", async () => {
+		const { server, driver, cookie } = await startFixtureServer();
+		const mux = new MuxClient(`${server.url.replace("http", "ws")}/api/remote.mux`, cookie);
+		await mux.opened();
+		mux.openStream("ev", "$events");
+		const ready = await mux.waitFor(frame => frame.streamId === "ev");
+		const clientId = (ready.value as { clientId: string }).clientId;
+
+		let settled: unknown;
+		emit(driver, {
+			kind: "ask-requested",
+			sessionId: "s1",
+			rpcId: "ask-1",
+			request: { kind: "approval", approval: { approvalId: "ap-1", toolName: "bash" } },
+			settle: outcome => {
+				settled = outcome;
+			},
+			fail: error => {
+				throw error;
 			},
 		});
-	});
+		const askFrame = await mux.waitFor(
+			frame => (frame.value as { event?: string })?.event === "approval/request",
+		);
+		const eventId = (askFrame.value as { eventId: string }).eventId;
+		expect(typeof eventId).toBe("string");
 
-	test("a commands-changed notification broadcasts the commands/change signal on mux", async () => {
-		const { server, driver } = await startFixtureServer();
-		// No attached sessions in this fixture: the signal is the only frame.
-		const collected = collectFrames(`${server.url.replace("http", "ws")}/api/events.mux`, 1, 5000);
-		await Bun.sleep(100);
-		for (const listener of driver.state.listeners) {
-			listener({ kind: "commands-changed" });
-		}
-		const [frame] = (await collected) as Array<{ method: string; payload: unknown }>;
-		expect(frame).toMatchObject({ method: "commands/change", payload: {} });
-	});
-
-	test("cancel-asks settles a parked approval and broadcasts its rejected resolution", async () => {
-		const { server, driver } = await startFixtureServer();
-		const collected = collectFramesObservable(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		await collected.opened;
-		let failResolve: (message: string) => void = () => {};
-		const failed = new Promise<string>(resolve => {
-			failResolve = resolve;
-		});
-		let settled: string | undefined;
-		for (const listener of driver.state.listeners) {
-			listener({
-				kind: "ask-requested",
-				sessionId: "s1",
-				rpcId: "ask-x",
-				request: {
-					kind: "approval",
-					approval: { approvalId: "ap-x", toolName: "write", reason: "Allow tool: write" },
-				},
-				settle: outcome => {
-					settled = outcome.kind === "approval" ? outcome.outcome : "wrong-kind";
-				},
-				fail: error => failResolve(error.message),
-			});
-		}
-		// The turn unwinds (abort/rewind/switch): the parked gate promise must
-		// settle and the client panel must drop via the resolved counterpart.
-		for (const listener of driver.state.listeners) {
-			listener({ kind: "cancel-asks", sessionId: "s1", reason: "omp-web: turn aborted" });
-		}
-		expect(await failed).toBe("omp-web: turn aborted");
-		expect(settled).toBeUndefined();
-		const seen = (await collected.frames) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(seen[0]).toMatchObject({ method: "approval/requested" });
-		expect(seen[1]).toMatchObject({
-			method: "approval/resolved",
-			payload: { type: "approval/resolved", sessionId: "s1", approvalId: "ap-x", outcome: "rejected" },
-		});
-		// The ask is gone: a late client answer answers not-pending.
-		const stale = await fetch(`${server.url}/api/respond`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				type: "client-response",
-				rpcId: "ask-x",
-				result: { ok: true, value: { sessionId: "s1", approvalId: "ap-x", outcome: "allowed-once" } },
-			}),
-		});
-		expect(await stale.json()).toEqual({ accepted: false, reason: "not-pending" });
-	});
-
-	test("cancel-asks settles a parked question with the cancelled resolution", async () => {
-		const { server, driver } = await startFixtureServer();
-		const collected = collectFramesObservable(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		await collected.opened;
-		let failResolve: (message: string) => void = () => {};
-		const failed = new Promise<string>(resolve => {
-			failResolve = resolve;
-		});
-		for (const listener of driver.state.listeners) {
-			listener({
-				kind: "ask-requested",
-				sessionId: "s1",
-				rpcId: "ask-q",
-				request: {
-					kind: "question",
-					questions: [{ id: "q-1", question: "pick", options: [{ label: "a" }, { label: "b" }] }],
-				},
-				settle: () => {},
-				fail: error => failResolve(error.message),
-			});
-			listener({ kind: "cancel-asks", sessionId: "s1", reason: "omp-web: session switched" });
-		}
-		expect(await failed).toBe("omp-web: session switched");
-		const seen = (await collected.frames) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(seen[0]).toMatchObject({ method: "question/requested" });
-		expect(seen[1]).toMatchObject({
-			method: "question/resolved",
-			payload: { type: "question/resolved", sessionId: "s1", questionRpcId: "ask-q", outcome: "cancelled" },
-		});
-	});
-
-	test("session-attached broadcasts the subscribed re-baseline with the queue snapshot", async () => {
-		const { server, driver } = await startFixtureServer();
-		const collected = collectFramesObservable(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		await collected.opened;
-		const queueItem = {
-			id: "q9",
-			placement: "queued" as const,
-			message: {
-				id: "m9",
-				role: "user" as const,
-				content: [{ type: "text" as const, text: "held" }],
-				source: { kind: "user" as const },
-			},
-		};
-		for (const listener of driver.state.listeners) {
-			listener({ kind: "session-attached", sessionId: "s2", lastSeq: 12, queue: [queueItem] });
-		}
-		const seen = (await collected.frames) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(seen[0]).toMatchObject({
-			method: "session/subscribed",
-			payload: { type: "session/subscribed", sessionId: "s2", lastSeq: 12 },
-		});
-		expect(seen[1]).toMatchObject({
-			method: "session/queue",
-			payload: { type: "session/queue", sessionId: "s2", items: [queueItem] },
-		});
-	});
-
-	test("GET /api/session.export serves the session log zip; HEAD probes; unknown ids 404", async () => {
-		const { server } = await startFixtureServer();
-		const head = await fetch(`${server.url}/api/session.export?sessionId=s1&includeDescendants=true`, {
-			method: "HEAD",
-		});
-		expect(head.status).toBe(200);
-		expect(head.headers.get("content-type")).toBe("application/zip");
-		expect(Number(head.headers.get("content-length"))).toBeGreaterThan(0);
-
-		const get = await fetch(`${server.url}/api/session.export?sessionId=s1`, { method: "GET" });
-		expect(get.status).toBe(200);
-		expect(get.headers.get("content-disposition")).toContain("omp-session-s1-logs.zip");
-		const body = new Uint8Array(await get.arrayBuffer());
-		// PK\x03\x04 local header magic, the entry name, and the stored payload.
-		expect([...body.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
-		const text = new TextDecoder().decode(body);
-		expect(text).toContain("s1.jsonl");
-		expect(text).toContain('{"type":"session"}');
-
-		const missing = await fetch(`${server.url}/api/session.export?sessionId=ghost`, { method: "GET" });
-		expect(missing.status).toBe(404);
-		const post = await fetch(`${server.url}/api/session.export?sessionId=s1`, { method: "POST" });
-		expect(post.status).toBe(405);
-		const noId = await fetch(`${server.url}/api/session.export`, { method: "GET" });
-		expect(noId.status).toBe(400);
-	});
-
-	test("an unimplemented method answers the envelope with the internal error", async () => {
-		const { server } = await startFixtureServer();
-		const response = await fetch(`${server.url}/api/session.fork`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("rpc-2", "session.fork", {}),
-		});
-		const envelope = (await response.json()) as { result: { ok: boolean; error: { code: string } } };
-		expect(envelope.result.ok).toBe(false);
-		expect(envelope.result.error.code).toBe("internal");
-	});
-
-	test("POST /api/respond yields the not-pending receipt; a malformed body yields bad-response", async () => {
-		const { server } = await startFixtureServer();
-		const respond = async (body: string): Promise<unknown> =>
-			(
-				await fetch(`${server.url}/api/respond`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body,
-				})
-			).json();
-		expect(
-			await respond(JSON.stringify({ type: "client-response", rpcId: "r", result: { ok: true, value: 1 } })),
-		).toEqual({ accepted: false, reason: "not-pending" });
-		expect(await respond(JSON.stringify({ type: "client-request", rpcId: "r" }))).toEqual({
-			accepted: false,
-			reason: "bad-response",
-		});
-	});
-
-	test("GET on a downlink path without an Upgrade header answers 426 asking for websocket", async () => {
-		const { server } = await startFixtureServer();
-		const response = await fetch(`${server.url}/api/events.mux`);
-		expect(response.status).toBe(426);
-		expect(response.headers.get("upgrade")).toBe("websocket");
-	});
-
-	test("the mux downlink opens with the subscribed baseline, then streams session events", async () => {
-		const { server, driver } = await startFixtureServer({ attached: [{ sessionId: "s1", lastSeq: 41 }] });
-		const collected = collectFrames(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		await Bun.sleep(100);
-		for (const listener of driver.state.listeners) {
-			listener({
-				kind: "session-event",
-				sessionId: "s1",
-				event: { type: "turn/start", seq: 42, time: 5, data: { turn: 0 } },
-			});
-		}
-		const frames = (await collected) as Array<{ type: string; rpcId: string; method: string; payload: unknown }>;
-		expect(frames[0]).toMatchObject({
-			type: "server-request",
-			method: "session/subscribed",
-			payload: { type: "session/subscribed", sessionId: "s1", lastSeq: 41 },
-		});
-		expect(frames[1]).toMatchObject({
-			type: "server-request",
-			method: "session/event",
-			payload: {
-				type: "session/event",
-				sessionId: "s1",
-				event: { type: "turn/start", seq: 42, time: 5, data: { turn: 0 } },
+		const result = await postApi(server, cookie, "$events/result", {
+			clientId,
+			eventId,
+			outcome: {
+				kind: "result",
+				value: { sessionId: "s1", approvalId: "ap-1", outcome: "allowed-once" },
 			},
 		});
-		expect(typeof frames[0].rpcId).toBe("string");
+		expect(result.body.result).toEqual({ ok: true, value: { accepted: true } });
+		expect(settled).toEqual({ kind: "approval", outcome: "allowed-once" });
+		mux.close();
 	});
 
-	test("the mux baseline carries the queue snapshot after subscribed, and queue flips stream", async () => {
-		const queueItem = {
-			id: "q1",
-			placement: "steering" as const,
-			message: {
-				id: "m1",
-				role: "user" as const,
-				content: [{ type: "text" as const, text: "steer this" }],
-				source: { kind: "user" as const },
-			},
-		};
-		const { server, driver } = await startFixtureServer({
-			attached: [{ sessionId: "s1", lastSeq: 7 }],
-			queues: new Map([["s1", [queueItem]]]),
-		});
-		const baseline = collectFrames(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		const baseFrames = (await baseline) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(baseFrames[0]).toMatchObject({ method: "session/subscribed" });
-		expect(baseFrames[1]).toMatchObject({
-			method: "session/queue",
-			payload: { type: "session/queue", sessionId: "s1", items: [queueItem] },
-		});
-		// A live queue flip rides the same mux channel (the fresh connection's
-		// first frame is its own subscribed baseline).
-		const flip = collectFrames(`${server.url.replace("http", "ws")}/api/events.mux`, 3, 5000);
-		await Bun.sleep(100);
-		for (const listener of driver.state.listeners) {
-			listener({ kind: "session-queue", sessionId: "s1", items: [] });
-		}
-		const flipFrames = (await flip) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(flipFrames.at(-1)).toMatchObject({
-			method: "session/queue",
-			payload: { type: "session/queue", sessionId: "s1", items: [] },
-		});
-	});
-
-	test("session.updateQueue reaches the driver; a malformed action folds into the internal error", async () => {
-		const { server, driver } = await startFixtureServer();
-		const ok = await fetch(`${server.url}/api/session.updateQueue`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("q-1", "session.updateQueue", {
-				sessionId: "s1",
-				itemId: "q1",
-				action: { kind: "steer" },
-			}),
-		});
-		expect(((await ok.json()) as { result: { ok: boolean; value: unknown } }).result).toEqual({
-			ok: true,
-			value: { accepted: true },
-		});
-		expect(driver.state.queueUpdates).toEqual([{ sessionId: "s1", itemId: "q1", action: { kind: "steer" } }]);
-		const edit = await fetch(`${server.url}/api/session.updateQueue`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("q-2", "session.updateQueue", {
-				sessionId: "s1",
-				itemId: "q1",
-				action: { kind: "edit", content: [{ type: "text", text: "new text" }] },
-			}),
-		});
-		expect(((await edit.json()) as { result: { ok: boolean } }).result.ok).toBe(true);
-		expect(driver.state.queueUpdates.at(-1)?.action).toEqual({
-			kind: "edit",
-			content: [{ type: "text", text: "new text" }],
-		});
-		const bad = await fetch(`${server.url}/api/session.updateQueue`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: rpcBody("q-3", "session.updateQueue", {
-				sessionId: "s1",
-				itemId: "q1",
-				action: { kind: "teleport" },
-			}),
-		});
-		expect(((await bad.json()) as { result: { ok: boolean } }).result.ok).toBe(false);
-	});
-
-	test("the host downlink carries session-added and status flips", async () => {
-		const { server, driver } = await startFixtureServer();
-		const collected = collectFrames(`${server.url.replace("http", "ws")}/api/events.host`, 2, 5000);
-		await Bun.sleep(100);
-		for (const listener of driver.state.listeners) {
-			listener({ kind: "session-added", sessionId: "s9", blank: true, cwd: "/tmp/project" });
-			listener({ kind: "session-status", sessionId: "s9", running: true });
-		}
-		const frames = (await collected) as Array<{ method: string; payload: Record<string, unknown> }>;
-		expect(frames[0]).toMatchObject({
-			method: "host/session-added",
-			payload: { type: "host/session-added", sessionId: "s9", blank: true, cwd: "/tmp/project" },
-		});
-		expect(frames[1]).toMatchObject({
-			method: "host/session-status",
-			payload: { type: "host/session-status", sessionId: "s9", running: true },
-		});
-	});
-
-	test("an approval ask parks, answers through /api/respond, and broadcasts both frames", async () => {
-		const { server, driver } = await startFixtureServer();
-		const frames = collectFrames(`${server.url.replace("http", "ws")}/api/events.mux`, 2, 5000);
-		await Bun.sleep(100);
-		let settled: string | undefined;
-		for (const listener of driver.state.listeners) {
-			listener({
-				kind: "ask-requested",
-				sessionId: "s1",
-				rpcId: "ask-1",
-				request: {
-					kind: "approval",
-					approval: { approvalId: "ap-1", toolName: "bash", reason: "Allow tool: bash" },
-				},
-				settle: outcome => {
-					settled = outcome.kind === "approval" ? outcome.outcome : "wrong-kind";
-				},
-				fail: error => {
-					settled = `failed:${error.message}`;
-				},
-			});
-		}
-		const respond = await fetch(`${server.url}/api/respond`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				type: "client-response",
-				rpcId: "ask-1",
-				result: { ok: true, value: { sessionId: "s1", approvalId: "ap-1", outcome: "allowed-once" } },
-			}),
-		});
-		expect(await respond.json()).toEqual({ accepted: true });
-		await Bun.sleep(200);
-		expect(settled).toBe("allowed-once");
-		const seen = (await frames) as Array<{ rpcId: string; method: string; payload: Record<string, unknown> }>;
-		// The envelope id must equal the ask id: the client's respond echoes the
-		// envelope rpcId back to /api/respond, which maps it onto the parked ask.
-		expect(seen[0].rpcId).toBe("ask-1");
-		expect(seen[0]).toMatchObject({
-			method: "approval/requested",
-			payload: { type: "approval/requested", sessionId: "s1", approvalId: "ap-1", toolName: "bash" },
-		});
-		expect(seen[1]).toMatchObject({
-			method: "approval/resolved",
-			payload: { type: "approval/resolved", sessionId: "s1", approvalId: "ap-1", outcome: "allowed-once" },
-		});
-		// A second respond for the settled rpcId answers not-pending.
-		const stale = await fetch(`${server.url}/api/respond`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				type: "client-response",
-				rpcId: "ask-1",
-				result: { ok: true, value: { sessionId: "s1", approvalId: "ap-1", outcome: "rejected" } },
-			}),
-		});
-		expect(await stale.json()).toEqual({ accepted: false, reason: "not-pending" });
-	});
-
-	test("a missing dsh-web dist fails startup naming the path", async () => {
-		const tree = await buildFixtureTree([]);
-		TREES.push(tree);
-		const fs = await import("node:fs/promises");
-		await fs.rm(tree.distIndex);
-		await expect(
-			startWebServer({
-				driver: fakeDriver(),
-				dshRoot: tree.root,
-				port: 0,
-				roster: ["@deepseek-ai/dsh-client-modules"],
-			}),
-		).rejects.toThrow(/frontend dist not found/);
+	test("the mux requires auth and an upgrade", async () => {
+		const { server, cookie } = await startFixtureServer();
+		expect((await fetch(`${server.url}/api/remote.mux`)).status).toBe(401);
+		expect((await fetch(`${server.url}/api/remote.mux`, { headers: { cookie } })).status).toBe(426);
 	});
 });
